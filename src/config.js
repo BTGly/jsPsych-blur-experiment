@@ -26,7 +26,6 @@ export function readFormParams() {
   const practiceCountEl = document.getElementById('practice_count')
   const startGroupEl = document.getElementById('start_group')
   const endGroupEl = document.getElementById('end_group')
-  const runPretestEl = document.getElementById('run_pretest')
   const uploadCodeEl = document.getElementById('upload_code')
 
   if (!participantEl && window.__experimentParams) {
@@ -67,11 +66,6 @@ function readExternalParams() {
   }
 
   return Object.fromEntries(params.entries())
-}
-
-function isEnabledParam(value, defaultValue) {
-  if (value === undefined || value === null || value === '') return defaultValue
-  return !['0', 'false', 'no', 'off'].includes(String(value).toLowerCase())
 }
 
 function escapeAttr(value) {

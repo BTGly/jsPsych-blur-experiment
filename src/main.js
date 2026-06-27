@@ -2,16 +2,15 @@ import { loadCSV } from './csv.js'
 import { conditionPath, assetPath, normalizePath } from './paths.js'
 import { createParamForm, readFormParams, getDateStr } from './config.js'
 import { seedFromParticipant } from './random.js'
-import { getPreloadTimeline } from './preload.js'
+import { preloadImages } from './preload.js'
 import { fitLogisticGrid } from './calibration/logistic.js'
 import { buildMonotonicP8Curve } from './calibration/monotonic.js'
-import { selectAlphas, FORMAL_PLAN } from './calibration/select-alpha.js'
+import { selectAlphas, FORMAL_PLAN, P8_WINDOWS } from './calibration/select-alpha.js'
 import { generateFormalTrials, splitBlocks } from './calibration/formal-generator.js'
 import { computePretestAlphaSummary, buildCalibrationSummary, computeExpectedMetrics } from './data/summaries.js'
 import { verifyPretestRecords } from './qc/checks.js'
 import { downloadAllData, downloadCSV } from './data/export-csv.js'
 import { RAW_DATA_FIELDS } from './data/schemas.js'
-import HoldResponseTrialPlugin from './task/hold-response-trial.js'
 
 import {
   createWelcomeTimeline, practiceIntroTimeline,
@@ -21,114 +20,204 @@ import { buildPracticeTimeline } from './timeline/practice.js'
 import { buildPretestTimeline } from './timeline/pretest.js'
 import { buildFormalTimeline } from './timeline/formal.js'
 
-;(async function () {
+const DEFAULT_SELECTED_ALPHAS = {
+  D1: 0.10,
+  D2: 0.30,
+  D3: 0.46,
+  D4: 0.54,
+  D5: 0.70,
+  D6: 0.90
+}
+
+showParamForm()
+
+function showParamForm() {
+  const target = document.getElementById('jspsych-target')
+  target.innerHTML = createParamForm()
+  document.getElementById('start-btn')?.addEventListener('click', () => {
+    const startBtn = document.getElementById('start-btn')
+    if (startBtn) {
+      startBtn.disabled = true
+      startBtn.textContent = '加载中...'
+    }
+    startExperiment().catch(showStartupError)
+  })
+}
+
+async function startExperiment() {
   console.log('jsPsych Blur Experiment starting...')
 
+  const fullscreenWasRequested = await requestFullscreen()
+
   let downloadTriggered = false
+  let runPhase = 'initial'
+  let abortTriggered = false
+  let abortInfo = null
+  const target = document.getElementById('jspsych-target')
+  const params = readFormParams()
+  target.innerHTML = ''
+  let formalBlocks = {}
+  let blockDistributionRows = []
+  let calibrationSummaryRows = []
+  let pretestAlphaSummaryRows = []
+  let pretestRecords = []
 
   const jsPsych = initJsPsych({
-    show_progress_bar: true,
+    display_element: target,
+    show_progress_bar: false,
     auto_update_progress_bar: false,
     on_finish: () => {
-      if (!downloadTriggered) {
-        downloadTriggered = true
-        triggerDownload(jsPsych)
+      if (abortTriggered) return
+      if (runPhase === 'initial') {
+        runFormalPhase().catch(showStartupError)
+      } else {
+        safeTriggerDownload()
       }
     }
   })
+  const safeTriggerDownload = () => {
+    if (downloadTriggered) return
+    downloadTriggered = true
+    teardownAbortControls()
+    triggerDownload(jsPsych, abortInfo)
+  }
 
-  jsPsych.registerPlugin(HoldResponseTrialPlugin)
+  const abortExperiment = (reason) => {
+    if (abortTriggered || downloadTriggered) return
+    abortTriggered = true
+    console.warn('Experiment aborted:', reason)
 
-  const params = readFormParams()
-  const subjectSeed = seedFromParticipant(params.participant)
+    jsPsych.__dataCollector = {
+      pretestRecords,
+      calibrationSummaryRows,
+      blockDistributionRows,
+      formalBlocks,
+      pretestAlphaSummary: pretestAlphaSummaryRows
+    }
 
-  const paramFormTrial = {
-    type: jsPsychHtmlKeyboardResponse,
-    stimulus: createParamForm(),
-    choices: ['NO_KEYS'],
-    trial_duration: 999999999,
-    response_ends_trial: false,
-    on_load: () => {
-      document.getElementById('start-btn')?.addEventListener('click', () => {
-        jsPsych.finishTrial()
-      })
+    if (!abortInfo) {
+      abortInfo = {
+        participant: params.participant,
+        date: getDateStr(),
+        phase: 'experiment_abort',
+        abort_reason: reason,
+        abort_time: new Date().toISOString()
+      }
+    }
+
+    try {
+      if (typeof jsPsych.endExperiment === 'function') {
+        jsPsych.endExperiment('')
+      }
+    } catch (err) {
+      console.warn('jsPsych endExperiment failed:', err)
+    }
+
+    target.innerHTML = '<div class="instruction-text">实验已提前结束。\n\n数据正在打包下载中...</div>'
+    safeTriggerDownload()
+  }
+
+  const onAbortKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      abortExperiment('escape_key')
     }
   }
+
+  const onFullscreenChange = () => {
+    if (fullscreenWasRequested && !document.fullscreenElement) {
+      abortExperiment('fullscreen_exit')
+    }
+  }
+
+  function teardownAbortControls() {
+    document.removeEventListener('keydown', onAbortKeyDown, true)
+    document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }
+
+  document.addEventListener('keydown', onAbortKeyDown, true)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+
+  const subjectSeed = seedFromParticipant(params.participant)
 
   const welcomeTrial = createWelcomeTimeline(jsPsych)
   const practiceIntro = practiceIntroTimeline()
   const pretestIntro = pretestIntroTimeline()
-  const formalIntro = formalIntroTimeline()
 
   const practiceTimeline = await buildPracticeTimeline(jsPsych)
 
   const pretestResult = await buildPretestTimeline(jsPsych)
   const pretestTimeline = pretestResult.timeline
-  const pretestRecords = pretestResult.pretestRecords
+  pretestRecords = pretestResult.pretestRecords
 
-  const totalTimeline = [paramFormTrial, welcomeTrial, practiceIntro]
+  const initialTimeline = [welcomeTrial]
 
   if (practiceTimeline.length > 0) {
     const practiceImages = practiceTimeline
-      .filter(t => t.stimulus)
+      .filter(t => typeof t.stimulus === 'string')
       .map(t => t.stimulus)
-    totalTimeline.push(getPreloadTimeline(practiceImages))
-    totalTimeline.push(...practiceTimeline)
+    preloadImages(practiceImages)
+    initialTimeline.push(practiceIntro)
+    initialTimeline.push(...practiceTimeline)
   }
 
   if (pretestTimeline.length > 0) {
-    totalTimeline.push(pretestIntro)
-    totalTimeline.push(...pretestTimeline)
+    const pretestImages = pretestTimeline
+      .filter(t => typeof t.stimulus === 'string')
+      .map(t => t.stimulus)
+    preloadImages(pretestImages)
+    initialTimeline.push(...pretestIntro)
+    initialTimeline.push(...pretestTimeline)
   }
 
-  let formalBlocks = {}
-  let blockDistributionRows = []
-  let calibrationSummaryRows = []
-  let pretestAlphaSummaryRows = []
+  async function runFormalPhase() {
+    let selected = null
+    let selectedInfo = null
+    const pretestUsedPaths = new Set()
+    const finalTimeline = []
 
-  if (pretestRecords.length > 0) {
-    const pretestSummary = computePretestAlphaSummary(pretestRecords)
-    pretestAlphaSummaryRows = pretestSummary.summaryRows
-    const { valid } = verifyPretestRecords(pretestRecords)
+    if (pretestRecords.length > 0) {
+      const pretestSummary = computePretestAlphaSummary(pretestRecords)
+      pretestAlphaSummaryRows = pretestSummary.summaryRows
+      const { valid } = verifyPretestRecords(pretestRecords)
 
-    if (valid && Object.keys(pretestSummary.alphaCounts).length >= 6) {
-      const { mu, sigma, nll } = fitLogisticGrid(pretestSummary.alphaCounts)
-      console.log('Logistic fit: mu=', mu, 'sigma=', sigma, 'nll=', nll)
+      if (valid && Object.keys(pretestSummary.alphaCounts).length >= 6) {
+        const { mu, sigma, nll } = fitLogisticGrid(pretestSummary.alphaCounts)
+        console.log('Logistic fit: mu=', mu, 'sigma=', sigma, 'nll=', nll)
 
-      const { monoPredict } = buildMonotonicP8Curve(pretestSummary.alphaCounts)
+        const { monoPredict } = buildMonotonicP8Curve(pretestSummary.alphaCounts)
 
-      const pretestUsedPaths = new Set()
-      for (const r of pretestRecords) {
-        if (r.image_path) pretestUsedPaths.add(normalizePath(r.image_path))
-      }
+        for (const r of pretestRecords) {
+          if (r.image_path) pretestUsedPaths.add(normalizePath(r.image_path))
+        }
 
-      const masterManifest = await loadCSV('assets/stimuli_master_pool/manifest.csv')
-      const alphaToImages = {}
-      for (const row of masterManifest) {
-        const a = parseFloat(parseFloat(row.alpha).toFixed(2))
-        if (!alphaToImages[a]) alphaToImages[a] = []
-        const relPath = 'stimuli_master_pool/' + row.alpha_dir + '/' + row.filename
-        alphaToImages[a].push({
-          rank: parseInt(row.rank),
-          image_path: relPath
-        })
-      }
-      for (const a of Object.keys(alphaToImages)) {
-        alphaToImages[a].sort((x, y) => x.rank - y.rank)
-        alphaToImages[a] = alphaToImages[a].filter(item =>
-          !pretestUsedPaths.has(normalizePath(item.image_path))
+        const alphaToImages = await loadFormalImagePool(pretestUsedPaths)
+        const selectionResult = selectAlphas(
+          pretestSummary.alphaCounts, alphaToImages, mu, sigma, monoPredict
         )
+        selected = selectionResult.selected
+        selectedInfo = selectionResult.selectedInfo
+        console.log('Selected alphas:', selected)
+
+        const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
+        const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
+        calibrationSummaryRows = buildCalibrationSummary(selectedInfo, mu, sigma, nll, expectedMetrics, FORMAL_PLAN)
+      } else {
+        console.warn('Pretest invalid, skipping formal experiment')
       }
-
-      const { selected, selectedInfo } = selectAlphas(
-        pretestSummary.alphaCounts, alphaToImages, mu, sigma, monoPredict
-      )
-      console.log('Selected alphas:', selected)
-
+    } else if (!params.run_pretest) {
+      selected = { ...DEFAULT_SELECTED_ALPHAS }
+      selectedInfo = buildDefaultSelectedInfo(selected)
       const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
       const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
-      calibrationSummaryRows = buildCalibrationSummary(selectedInfo, mu, sigma, nll, expectedMetrics, FORMAL_PLAN)
+      calibrationSummaryRows = buildCalibrationSummary(selectedInfo, null, null, null, expectedMetrics, FORMAL_PLAN)
+      console.warn('Pretest disabled, using default selected alphas:', selected)
+    }
 
+    if (selected && selectedInfo) {
+      const formalIntro = formalIntroTimeline()
+      const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
+      const alphaToImages = await loadFormalImagePool(pretestUsedPaths)
       const formalTrials = generateFormalTrials(
         selected, alphaToImages, pretestUsedPaths, totalPlannedTrials, subjectSeed
       )
@@ -138,7 +227,7 @@ import { buildFormalTimeline } from './timeline/formal.js'
       formalBlocks = blockResult.formalBlocks
       blockDistributionRows = blockResult.blockDistributionRows
 
-      totalTimeline.push(formalIntro)
+      finalTimeline.push(...formalIntro)
 
       const formalImagePaths = new Set()
       for (const blockId of Object.keys(formalBlocks)) {
@@ -146,40 +235,121 @@ import { buildFormalTimeline } from './timeline/formal.js'
           formalImagePaths.add(assetPath(t.image_path))
         }
       }
-      totalTimeline.push(getPreloadTimeline([...formalImagePaths]))
+      preloadImages([...formalImagePaths])
 
       const formalTrialTimeline = buildFormalTimeline(jsPsych, formalBlocks)
-      totalTimeline.push(...formalTrialTimeline)
-    } else {
-      console.warn('Pretest invalid, skipping formal experiment')
+      finalTimeline.push(...formalTrialTimeline)
+    }
+
+    jsPsych.__dataCollector = {
+      pretestRecords,
+      calibrationSummaryRows,
+      blockDistributionRows,
+      formalBlocks,
+      pretestAlphaSummary: pretestAlphaSummaryRows
+    }
+
+    finalTimeline.push(endingTimeline(() => {
+      safeTriggerDownload()
+    }))
+
+    runPhase = 'final'
+    target.innerHTML = ''
+    jsPsych.run(finalTimeline)
+  }
+
+  jsPsych.run(initialTimeline)
+}
+
+async function requestFullscreen() {
+  const element = document.documentElement
+  if (document.fullscreenElement || !element.requestFullscreen) return false
+
+  try {
+    await element.requestFullscreen()
+    return true
+  } catch (err) {
+    console.warn('Fullscreen request failed:', err)
+    return false
+  }
+}
+
+async function loadFormalImagePool(pretestUsedPaths) {
+  const masterManifest = await loadCSV('assets/stimuli_master_pool/manifest.csv')
+  const alphaToImages = {}
+  for (const row of masterManifest) {
+    const a = parseFloat(parseFloat(row.alpha).toFixed(2))
+    if (!alphaToImages[a]) alphaToImages[a] = []
+    const relPath = 'stimuli_master_pool/' + row.alpha_dir + '/' + row.filename
+    alphaToImages[a].push({
+      rank: parseInt(row.rank),
+      image_path: relPath
+    })
+  }
+  for (const a of Object.keys(alphaToImages)) {
+    alphaToImages[a].sort((x, y) => x.rank - y.rank)
+    alphaToImages[a] = alphaToImages[a].filter(item =>
+      !pretestUsedPaths.has(normalizePath(item.image_path))
+    )
+  }
+  return alphaToImages
+}
+
+function buildDefaultSelectedInfo(selected) {
+  const info = {}
+  for (const cfg of FORMAL_PLAN) {
+    const dname = cfg.difficulty_id
+    const selectedAlpha = selected[dname]
+    const targetP8 = parseFloat(cfg.target_p8)
+    const cfgLabel = parseInt(cfg.label_digit)
+    const [lowWin, highWin] = P8_WINDOWS[dname] || [0.0, 1.0]
+    info[dname] = {
+      difficulty_id: dname,
+      selection_mode: 'default_fallback',
+      selected_alpha: selectedAlpha,
+      target_p8: targetP8,
+      fitted_p8: targetP8,
+      fitted_p8_logistic: targetP8,
+      fitted_p8_mono: targetP8,
+      target_gap: 0,
+      ideal_alpha_logistic: selectedAlpha,
+      label_digit: cfgLabel,
+      n_trials: parseInt(cfg.n_trials),
+      candidate_count: 1,
+      feasible_p8_min: targetP8,
+      feasible_p8_max: targetP8,
+      target_reachable_by_side: true,
+      target_feasible: true,
+      expected_correct: cfgLabel === 3 ? 1.0 - targetP8 : targetP8,
+      p8_window_low: lowWin,
+      p8_window_high: highWin,
+      p8_window_ok: true,
+      anchor_fixed_used: false,
+      anchor_candidates: '',
+      anchor_fallback_used: false,
+      duplicate_fallback_used: false,
+      reserved_anchor_fallback_used: false,
+      warning_msg: 'default_alpha_fallback_no_pretest'
     }
   }
+  return info
+}
 
-  jsPsych.__dataCollector = {
-    pretestRecords,
-    calibrationSummaryRows,
-    blockDistributionRows,
-    formalBlocks,
-    pretestAlphaSummary: pretestAlphaSummaryRows
-  }
-
-  totalTimeline.push(endingTimeline(() => {
-    triggerDownload(jsPsych)
-  }))
-
-  jsPsych.run(totalTimeline)
-})().catch(err => {
+function showStartupError(err) {
   console.error('Experiment setup failed:', err)
   document.body.innerHTML = `<div style="color:red;padding:40px;font-size:20px;">
     <h1>实验初始化失败</h1>
     <p>${err.message}</p>
     <p>请检查控制台以获取详细信息。</p>
   </div>`
-})
+}
 
-function triggerDownload(jsPsych) {
+function triggerDownload(jsPsych, abortInfo = null) {
   const collector = jsPsych.__dataCollector || {}
-  const allData = jsPsych.data.get().filter({}).values
+  let allData = jsPsych.data.get().filter({}).values()
+  if (abortInfo) {
+    allData = [...allData, abortInfo]
+  }
   const params = readFormParams()
   const dateStr = getDateStr()
 
@@ -193,12 +363,7 @@ function triggerDownload(jsPsych) {
       console.log('Data download complete.')
       const msgEl = document.querySelector('.instruction-text')
       if (msgEl) {
-        msgEl.innerHTML = `
-          <h1>实验结束</h1>
-          <p>感谢你的参与！</p>
-          <p>数据已下载完成。</p>
-          <p>你可以关闭此页面。</p>
-        `
+        msgEl.innerHTML = '实验结束！感谢您的参与。<br><br>数据已下载完成。<br><br>你可以关闭此页面。'
       }
     }).catch(err => {
       console.error('Download failed, saving raw CSV:', err)

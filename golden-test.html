@@ -19,7 +19,7 @@
   <p>使用 S001 预实验数据，验证算法逻辑正确性</p>
   <div id="output"></div>
 
-  <script src="https://unpkg.com/jspsych@8.0.8"></script>
+  <script src="https://unpkg.com/jspsych@8.0.2"></script>
   <script type="module">
     import { logisticP8, fitLogisticGrid, invLogisticAlpha } from './src/calibration/logistic.js'
     import { buildMonotonicP8Curve, betaSmoothP8 } from './src/calibration/monotonic.js'
@@ -56,7 +56,7 @@
     const mockAlphas = [0.0, 0.10, 0.20, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.80, 0.90, 1.00]
     const mockAlphaToImages = {}
     for (const a of mockAlphas) {
-      mockAlphaToImages[a] = Array.from({length: 200}, (_, i) => ({
+      mockAlphaToImages[a] = Array.from({length: 700}, (_, i) => ({
         rank: i + 1,
         image_path: `stimuli_master_pool/alpha_${a.toFixed(2)}/a${a.toFixed(2)}_rank${String(i+1).padStart(3,'0')}.png`
       }))

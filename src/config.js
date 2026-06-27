@@ -15,13 +15,29 @@ export function createParamForm() {
 }
 
 export function readFormParams() {
-  return {
-    participant: document.getElementById('participant').value.trim() || 'S001',
-    practice_count: parseInt(document.getElementById('practice_count').value) || 24,
-    start_group: parseInt(document.getElementById('start_group').value) || 1,
-    end_group: parseInt(document.getElementById('end_group').value) || 11,
-    run_pretest: document.getElementById('run_pretest').checked ? 1 : 0
+  const participantEl = document.getElementById('participant')
+  const practiceCountEl = document.getElementById('practice_count')
+  const startGroupEl = document.getElementById('start_group')
+  const endGroupEl = document.getElementById('end_group')
+  const runPretestEl = document.getElementById('run_pretest')
+
+  if (!participantEl && window.__experimentParams) {
+    return window.__experimentParams
   }
+
+  const practiceCount = parseInt(practiceCountEl?.value)
+  const startGroup = parseInt(startGroupEl?.value)
+  const endGroup = parseInt(endGroupEl?.value)
+
+  const params = {
+    participant: participantEl?.value.trim() || 'S001',
+    practice_count: Number.isNaN(practiceCount) ? 24 : practiceCount,
+    start_group: Number.isNaN(startGroup) ? 1 : startGroup,
+    end_group: Number.isNaN(endGroup) ? 11 : endGroup,
+    run_pretest: runPretestEl ? (runPretestEl.checked ? 1 : 0) : 1
+  }
+  window.__experimentParams = params
+  return params
 }
 
 export function getDateStr() {

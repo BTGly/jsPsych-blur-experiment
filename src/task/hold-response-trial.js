@@ -1,26 +1,30 @@
+const ParameterType = window.jsPsychModule?.ParameterType || window.jsPsych?.ParameterType
+
 const info = {
   name: 'hold-response-trial',
+  version: '1.0.0',
   parameters: {
-    stimulus: { type: jsPsych.ParameterType.IMAGE, default: undefined },
-    stimulus_ms: { type: jsPsych.ParameterType.INT, default: 200 },
-    fixation_ms: { type: jsPsych.ParameterType.INT, default: 500 },
-    show_time: { type: jsPsych.ParameterType.FLOAT, default: 0.5 },
-    response_timeout: { type: jsPsych.ParameterType.FLOAT, default: 2.0 },
-    max_hold: { type: jsPsych.ParameterType.FLOAT, default: 1.0 },
-    phase: { type: jsPsych.ParameterType.STRING, default: '' },
-    trial_index: { type: jsPsych.ParameterType.INT, default: 0 },
-    block_id: { type: jsPsych.ParameterType.INT, default: 0 },
-    trial_in_block: { type: jsPsych.ParameterType.INT, default: 0 },
-    difficulty_id: { type: jsPsych.ParameterType.STRING, default: '' },
-    difficulty_rank: { type: jsPsych.ParameterType.INT, default: 0 },
-    alpha: { type: jsPsych.ParameterType.STRING, default: '0' },
-    label_digit: { type: jsPsych.ParameterType.INT, default: 3 },
-    label_type: { type: jsPsych.ParameterType.STRING, default: 'normal' },
-    sample_type: { type: jsPsych.ParameterType.STRING, default: 'normal' },
-    image_path: { type: jsPsych.ParameterType.STRING, default: '' },
-    participant: { type: jsPsych.ParameterType.STRING, default: '' },
-    date: { type: jsPsych.ParameterType.STRING, default: '' }
-  }
+    stimulus: { type: ParameterType.IMAGE, default: undefined },
+    stimulus_ms: { type: ParameterType.INT, default: 200 },
+    fixation_ms: { type: ParameterType.INT, default: 500 },
+    show_time: { type: ParameterType.FLOAT, default: 0.5 },
+    response_timeout: { type: ParameterType.FLOAT, default: 2.0 },
+    max_hold: { type: ParameterType.FLOAT, default: 1.0 },
+    phase: { type: ParameterType.STRING, default: '' },
+    trial_index: { type: ParameterType.INT, default: 0 },
+    block_id: { type: ParameterType.INT, default: 0 },
+    trial_in_block: { type: ParameterType.INT, default: 0 },
+    difficulty_id: { type: ParameterType.STRING, default: '' },
+    difficulty_rank: { type: ParameterType.INT, default: 0 },
+    alpha: { type: ParameterType.STRING, default: '0' },
+    label_digit: { type: ParameterType.INT, default: 3 },
+    label_type: { type: ParameterType.STRING, default: 'normal' },
+    sample_type: { type: ParameterType.STRING, default: 'normal' },
+    image_path: { type: ParameterType.STRING, default: '' },
+    participant: { type: ParameterType.STRING, default: '' },
+    date: { type: ParameterType.STRING, default: '' }
+  },
+  data: {}
 }
 
 class HoldResponseTrialPlugin {
@@ -50,6 +54,21 @@ class HoldResponseTrialPlugin {
     container.style.cssText = 'width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#111;'
     display_element.appendChild(container)
 
+    const stimulusFrame = document.createElement('div')
+    stimulusFrame.className = 'stimulus-frame'
+    stimulusFrame.style.display = 'none'
+    container.appendChild(stimulusFrame)
+
+    const labelLeft = document.createElement('div')
+    labelLeft.className = 'choice-label choice-label-left'
+    labelLeft.textContent = '3'
+    stimulusFrame.appendChild(labelLeft)
+
+    const labelRight = document.createElement('div')
+    labelRight.className = 'choice-label choice-label-right'
+    labelRight.textContent = '8'
+    stimulusFrame.appendChild(labelRight)
+
     const fixationEl = document.createElement('div')
     fixationEl.className = 'fixation'
     fixationEl.textContent = '+'
@@ -59,19 +78,31 @@ class HoldResponseTrialPlugin {
     const imgEl = document.createElement('img')
     imgEl.className = 'stimulus-image'
     imgEl.src = trial.stimulus
-    imgEl.style.cssText = 'display:none;max-width:80vw;max-height:80vh;'
-    container.appendChild(imgEl)
+    imgEl.style.display = 'none'
+    stimulusFrame.appendChild(imgEl)
 
-    const hintEl = document.createElement('div')
-    hintEl.className = 'response-hint'
-    hintEl.textContent = '按 F (正常=3) 或 K (缺陷=8)'
-    hintEl.style.cssText = 'position:absolute;bottom:60px;font-size:20px;color:#aaa;'
-    container.appendChild(hintEl)
-
-    this._startFixationPhase(container, fixationEl, imgEl, hintEl, state, trial)
+    this._ensureImageReady(imgEl).then(() => {
+      if (!state.trialEnded) {
+        this._startFixationPhase(container, fixationEl, stimulusFrame, imgEl, state, trial)
+      }
+    })
   }
 
-  _startFixationPhase(container, fixationEl, imgEl, hintEl, state, trial) {
+  _ensureImageReady(imgEl) {
+    if (imgEl.complete && imgEl.naturalWidth > 0) {
+      if (imgEl.decode) return imgEl.decode().catch(() => {})
+      return Promise.resolve()
+    }
+    return new Promise((resolve) => {
+      imgEl.onload = () => {
+        if (imgEl.decode) imgEl.decode().then(resolve).catch(resolve)
+        else resolve()
+      }
+      imgEl.onerror = () => resolve()
+    })
+  }
+
+  _startFixationPhase(container, fixationEl, stimulusFrame, imgEl, state, trial) {
     const fixationDuration = trial.fixation_ms || Math.round(trial.show_time * 1000)
     let anyKeyDown = false
 
@@ -94,12 +125,13 @@ class HoldResponseTrialPlugin {
       document.removeEventListener('keydown', fixKeyDown)
       document.removeEventListener('keyup', fixKeyUp)
       state.earlyKeyDown = anyKeyDown
-      this._showStimulus(container, fixationEl, imgEl, hintEl, state, trial)
+      this._showStimulus(container, fixationEl, stimulusFrame, imgEl, state, trial)
     }, fixationDuration)
   }
 
-  _showStimulus(container, fixationEl, imgEl, hintEl, state, trial) {
+  _showStimulus(container, fixationEl, stimulusFrame, imgEl, state, trial) {
     fixationEl.style.display = 'none'
+    stimulusFrame.style.display = 'block'
     imgEl.style.display = 'block'
 
     const stimOnset = performance.now()
@@ -123,6 +155,8 @@ class HoldResponseTrialPlugin {
         clearTimeout(state.timeoutId)
 
         state.holdTimeoutId = setTimeout(() => {
+          state.holdDuration = trial.max_hold
+          state.keyReleased = false
           this._endTrial(container, state, trial)
         }, trial.max_hold * 1000)
       }

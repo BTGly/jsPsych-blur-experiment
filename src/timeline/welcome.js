@@ -1,24 +1,22 @@
 import { createParamForm, readFormParams, getDateStr } from '../config.js'
 
+function textScreen(text) {
+  return `<div class="instruction-text">${escapeHtml(text)}</div>`
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 export function createWelcomeTimeline(jsPsych) {
   const welcome = {
     type: jsPsychHtmlKeyboardResponse,
-    stimulus: `
-      <div class="instruction-text">
-        <h1>欢迎参加本实验</h1>
-        <p>本实验是一个模拟异常检测任务。</p>
-        <p>你可以把自己想象成一名质检员：<br>
-        屏幕上会快速出现一张图像，<br>
-        你需要判断它更像"正常样本"还是"缺陷样本"。</p>
-        <p>在本实验中：<br>
-        <b>正常样本 = 数字 3</b> &nbsp;&nbsp;&nbsp; <b>缺陷样本 = 数字 8</b></p>
-        <p>实验主要包括：<br>
-        1. 练习：熟悉按键和规则<br>
-        2. 预实验：估计你的个人难度水平<br>
-        3. 正式实验：完成主要判断任务</p>
-        <p>准备好后，请按 Enter 开始。</p>
-      </div>
-    `,
+    stimulus: textScreen('欢迎参加本实验\n\n本实验是一个模拟异常检测任务。\n\n你可以把自己想象成一名质检员：\n屏幕上会快速出现一张图像，\n你需要判断它更像“正常样本”还是“缺陷样本”。\n\n在本实验中：\n正常样本 = 数字 3    缺陷样本 = 数字 8\n\n实验主要包括：\n1. 练习：熟悉按键和规则\n2. 预实验：估计你的个人难度水平\n3. 正式实验：完成主要判断任务\n\n准备好后，请按 Enter 开始。'),
     choices: ['Enter'],
     response_ends_trial: true,
     on_finish: () => {
@@ -35,69 +33,62 @@ export function createWelcomeTimeline(jsPsych) {
 export function practiceIntroTimeline() {
   return {
     type: jsPsychHtmlKeyboardResponse,
-    stimulus: `
-      <div class="instruction-text">
-        <h1>练习阶段</h1>
-        <p>接下来你将进行一些练习，熟悉实验流程。</p>
-        <p>按键规则：</p>
-        <p><b>F 键</b> = 判断为正常样本（数字 3）</p>
-        <p><b>K 键</b> = 判断为缺陷样本（数字 8）</p>
-        <p>图片出现后请尽快按键判断。<br>
-        按住按键的时间代表你的信心程度：<br>
-        按得越久 = 越有把握。</p>
-        <p>准备好后，请按 Enter 开始练习。</p>
-      </div>
-    `,
+    stimulus: textScreen('环节1：练习\n\n这是正式任务前的练习环节。\n\n请判断图像更像正常样本还是缺陷样本：\n\nF = 正常样本（3）    K = 缺陷样本（8）\n\n图像出现后即可按键作答，图像只呈现 0.2 秒。\n图像消失后，左右按键提示仍会保留，你可以继续完成判断。\n\n按住时长表示你的自信程度：\n越确定，按住越久；\n最长按住 1 秒，松开即确认。\n\n练习阶段会显示对错反馈，\n帮助你熟悉规则。\n\n准备好后，请按 Enter 开始练习。'),
     choices: ['Enter'],
     response_ends_trial: true
   }
 }
 
 export function pretestIntroTimeline() {
-  return {
-    type: jsPsychHtmlKeyboardResponse,
-    stimulus: `
-      <div class="instruction-text">
-        <h1>预实验阶段</h1>
-        <p>接下来你将完成 180 个预实验 trial。</p>
-        <p>预实验的结果将用于估算你的个人难度水平，<br>
-        以便在正式实验中为你选择合适的题目。</p>
-        <p>请认真完成每一题。</p>
-        <p>准备好后，请按 Enter 开始预实验。</p>
-      </div>
-    `,
-    choices: ['Enter'],
-    response_ends_trial: true
-  }
+  return [
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('环节2：预实验\n\n接下来是预实验环节。\n\n预实验的目的不是考察你的成绩，\n而是了解你对不同难度图像的判断情况。\n\n请始终根据你的第一感觉判断。\n正式实验的难度会根据你的预实验结果自动调整。\n\n准备好后，请按 Enter 继续。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    },
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('预实验作答规则 ①\n\n请先注视屏幕中央的“+”。\n\n图像出现后即可按键作答，图像只呈现 0.2 秒。\n图像消失后，左右按键提示仍会保留，你可以继续完成判断。\n\n预实验不显示对错反馈。\n请根据第一感觉判断。\n\n准备好后，请按 Enter 继续。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    },
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('预实验作答规则 ②\n\n图像出现后即可按键作答，图像只呈现 0.2 秒。\n图像消失后，左右按键提示仍会保留，你可以继续完成判断。\n\nF = 正常样本（3）  K = 缺陷样本（8）\n\n按住时长表示你的自信程度：\n越确定，按住越久。\n\n最长按住 1 秒，\n松开即确认。\n\n请不要刻意猜比例，\n每一题都根据当前图像判断。\n\n准备好后，请按 Enter 开始预实验。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    }
+  ]
 }
 
 export function formalIntroTimeline() {
-  return {
-    type: jsPsychHtmlKeyboardResponse,
-    stimulus: `
-      <div class="instruction-text">
-        <h1>正式实验</h1>
-        <p>正式实验共 11 个 block，每个 block 100 题。</p>
-        <p>每个 block 结束后你可以短暂休息。</p>
-        <p>请保持注意力集中，认真完成每一题。</p>
-        <p>准备好后，请按 Enter 开始正式实验。</p>
-      </div>
-    `,
-    choices: ['Enter'],
-    response_ends_trial: true
-  }
+  return [
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('环节3：正式实验\n\n接下来你将完成一个模拟异常检测任务。\n\n请把自己想象成一名质检员：\n屏幕上会快速出现一张图像，\n你需要判断它更像“正常样本”还是“缺陷样本”。\n\n在本实验中：\n\n正常样本 = 数字 3    缺陷样本 = 数字 8\n\n准备好后，请按 Enter 继续。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    },
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('在正式实验中，\n正常样本会比缺陷样本更多。\n\n也就是说，你会更常看到正常样本，\n但缺陷样本仍然会随机出现。\n\n请注意：\n不要机械地按照比例猜测，\n每一题都要根据当前图像本身作答。\n\n准备好后，请按 Enter 继续。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    },
+    {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: textScreen('正式作答规则\n\n请先注视屏幕中央的“+”。\n\n图像出现后即可按键作答，图像只呈现 0.2 秒。\n图像消失后，左右按键提示仍会保留，你可以继续完成判断。\n\n按住时长表示你的自信程度：\n越确定，按住越久；\n最长按住 1 秒，松开即确认。\n\n正式实验不显示对错反馈。\n\n准备好后，请按 Enter 开始正式实验。'),
+      choices: ['Enter'],
+      response_ends_trial: true
+    }
+  ]
 }
 
 export function endingTimeline(downloadHandler) {
   return {
     type: jsPsychHtmlKeyboardResponse,
-    stimulus: `
-      <div class="instruction-text">
-        <h1>实验结束</h1>
-        <p>感谢你的参与！</p>
-        <p>数据正在打包下载中...</p>
-      </div>
-    `,
+    stimulus: textScreen('实验结束！感谢您的参与。\n\n数据正在打包下载中...'),
     choices: ['NO_KEYS'],
     trial_duration: 500,
     response_ends_trial: false,

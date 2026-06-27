@@ -1,12 +1,12 @@
 import { logisticP8, invLogisticAlpha } from './logistic.js'
 
 export const FORMAL_PLAN = [
-  { difficulty_id: 'D1', target_p8: 0.10, n_trials: 82,  label_digit: 3, selection_mode: 'fixed_anchor', anchor_alphas: [0.10, 0.00] },
+  { difficulty_id: 'D1', target_p8: 0.05, n_trials: 82,  label_digit: 3, selection_mode: 'fixed_anchor', anchor_alphas: [0.10, 0.00] },
   { difficulty_id: 'D2', target_p8: 0.25, n_trials: 165, label_digit: 3, selection_mode: 'target_p8' },
   { difficulty_id: 'D3', target_p8: 0.45, n_trials: 578, label_digit: 3, selection_mode: 'target_p8' },
-  { difficulty_id: 'D4', target_p8: 0.55, n_trials: 209, label_digit: 8, selection_mode: 'target_p8' },
-  { difficulty_id: 'D5', target_p8: 0.75, n_trials: 38,  label_digit: 8, selection_mode: 'target_p8' },
-  { difficulty_id: 'D6', target_p8: 0.90, n_trials: 28,  label_digit: 8, selection_mode: 'fixed_anchor', anchor_alphas: [0.90, 1.00] }
+  { difficulty_id: 'D4', target_p8: 0.60, n_trials: 209, label_digit: 8, selection_mode: 'target_p8' },
+  { difficulty_id: 'D5', target_p8: 0.80, n_trials: 38,  label_digit: 8, selection_mode: 'target_p8' },
+  { difficulty_id: 'D6', target_p8: 0.95, n_trials: 28,  label_digit: 8, selection_mode: 'fixed_anchor', anchor_alphas: [0.90, 1.00] }
 ]
 
 export const P8_WINDOWS = {
@@ -228,6 +228,9 @@ export function selectAlphas(
       rows = candidateRows(cfgLabel, targetP8, nNeed, new Set(), false)
     }
     if (rows.length === 0) throw new Error(`${cfg.difficulty_id} 没有可用 alpha。`)
+    const [lowWin, highWin] = P8_WINDOWS[cfg.difficulty_id] || [0.0, 1.0]
+    const windowRows = rows.filter(r => lowWin <= r.p8Pred && r.p8Pred <= highWin)
+    if (windowRows.length > 0) rows = windowRows
     const idealAlpha = invLogisticAlpha(targetP8, mu, sigma)
     rows.sort((a, b) => {
       if (a.targetGap !== b.targetGap) return a.targetGap - b.targetGap

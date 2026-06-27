@@ -2,6 +2,8 @@
 
 Web-based blur discrimination experiment migrated from PsychoPy to [jsPsych](https://www.jspsych.org/) 8.0.
 
+中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+
 **Live**: https://btgly.github.io/jsPsych-blur-experiment/  
 **Golden Test**: https://btgly.github.io/jsPsych-blur-experiment/golden-test.html
 

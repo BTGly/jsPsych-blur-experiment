@@ -1,6 +1,8 @@
 import { loadCSV } from '../csv.js'
 import { conditionPath, assetPath, normalizePath } from '../paths.js'
 import { getDateStr, readFormParams } from '../config.js'
+import { pretestBlockFeedbackTimeline } from '../task/feedback.js'
+import HoldResponseTrialPlugin from '../task/hold-response-trial.js'
 
 export async function buildPretestTimeline(jsPsych) {
   const params = readFormParams()
@@ -12,7 +14,10 @@ export async function buildPretestTimeline(jsPsych) {
 
   let globalIndex = 0
 
-  for (const groupRow of manifest) {
+  const totalBlocks = manifest.length
+
+  for (let groupIndex = 0; groupIndex < manifest.length; groupIndex++) {
+    const groupRow = manifest[groupIndex]
     const csvPath = 'assets/' + groupRow.csv_path
     const groupTrials = await loadCSV(csvPath)
 
@@ -21,7 +26,7 @@ export async function buildPretestTimeline(jsPsych) {
       const imageAssetPath = assetPath(rawImagePath)
 
       const trial = {
-        type: 'hold-response-trial',
+        type: HoldResponseTrialPlugin,
         stimulus: imageAssetPath,
         stimulus_ms: 200,
         fixation_ms: Math.round(parseFloat(row.show_time) * 1000),
@@ -49,6 +54,8 @@ export async function buildPretestTimeline(jsPsych) {
       timeline.push(trial)
       globalIndex++
     }
+
+    timeline.push(pretestBlockFeedbackTimeline(groupIndex + 1, totalBlocks))
   }
 
   return { timeline, pretestRecords }

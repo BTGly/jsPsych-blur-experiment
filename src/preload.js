@@ -1,9 +1,7 @@
-export function getPreloadTimeline(imagePaths) {
-  const uniquePaths = [...new Set(imagePaths)]
-  return {
-    type: jsPsychPreload,
-    images: uniquePaths,
-    show_progress_bar: true,
-    message: '资源加载中，请稍候...'
+export function preloadImages(imagePaths) {
+  const uniquePaths = [...new Set(imagePaths)].filter(Boolean)
+  for (const path of uniquePaths) {
+    const img = new Image()
+    img.src = path
   }
 }

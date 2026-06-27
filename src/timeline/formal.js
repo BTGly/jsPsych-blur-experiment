@@ -1,6 +1,7 @@
 import { getDateStr, readFormParams } from '../config.js'
-import { blockFeedbackTimeline } from '../task/feedback.js'
+import { blockFeedbackTimeline, formalBlockIntroTimeline } from '../task/feedback.js'
 import { assetPath, normalizePath } from '../paths.js'
+import HoldResponseTrialPlugin from '../task/hold-response-trial.js'
 
 export function buildFormalTimeline(jsPsych, formalBlocks) {
   const params = readFormParams()
@@ -21,12 +22,14 @@ export function buildFormalTimeline(jsPsych, formalBlocks) {
     const trials = formalBlocks[blockId]
     const blockNum = parseInt(blockId)
 
+    timeline.push(formalBlockIntroTimeline(blockNum, 11, trials.length))
+
     for (const row of trials) {
       const rawImagePath = normalizePath(row.image_path)
       const imageAssetPath = assetPath(rawImagePath)
 
       timeline.push({
-        type: 'hold-response-trial',
+        type: HoldResponseTrialPlugin,
         stimulus: imageAssetPath,
         stimulus_ms: 200,
         fixation_ms: row.fixation_ms,
@@ -49,9 +52,7 @@ export function buildFormalTimeline(jsPsych, formalBlocks) {
       })
     }
 
-    if (bi < activeBlockIds.length - 1) {
-      timeline.push(blockFeedbackTimeline(blockNum, trials))
-    }
+    timeline.push(blockFeedbackTimeline(jsPsych, blockNum, 11, trials.length))
   }
 
   return timeline

@@ -1,17 +1,19 @@
 import { loadCSV } from '../csv.js'
 import { conditionPath, assetPath, normalizePath } from '../paths.js'
 import { getDateStr, readFormParams } from '../config.js'
-import { trialFeedbackTimeline } from '../task/feedback.js'
+import { practiceEndTimeline, practiceFeedbackTimeline } from '../task/feedback.js'
+import HoldResponseTrialPlugin from '../task/hold-response-trial.js'
 
 export async function buildPracticeTimeline(jsPsych) {
   const params = readFormParams()
-  const practiceCount = Math.max(0, Math.min(80, params.practice_count || 24))
+  const practiceCount = Math.max(0, Math.min(80, params.practice_count))
   if (practiceCount <= 0) return []
 
   const allRows = await loadCSV(conditionPath('practice_data.csv'))
   const rows = allRows.slice(0, practiceCount)
 
   const timeline = []
+  const practiceState = { points: 0 }
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
@@ -19,7 +21,7 @@ export async function buildPracticeTimeline(jsPsych) {
     const imageAssetPath = assetPath(rawImagePath)
 
     const trial = {
-      type: 'hold-response-trial',
+      type: HoldResponseTrialPlugin,
       stimulus: imageAssetPath,
       stimulus_ms: 200,
       fixation_ms: Math.round(parseFloat(row.show_time) * 1000),
@@ -42,24 +44,10 @@ export async function buildPracticeTimeline(jsPsych) {
     }
 
     timeline.push(trial)
-
-    timeline.push({
-      type: jsPsychHtmlKeyboardResponse,
-      stimulus: () => {
-        const lastData = jsPsych.data.get().filter({}).values.slice(-1)[0]
-        if (!lastData) return '<div>---</div>'
-        const correct = lastData.manual_accuracy
-        let text, cls
-        if (correct === 1) { text = '正确！'; cls = 'feedback-correct' }
-        else if (correct === 0) { text = '错误'; cls = 'feedback-incorrect' }
-        else { text = '超时'; cls = 'feedback-timeout' }
-        return `<div class="${cls}" style="font-size:28px;">${text}</div>`
-      },
-      choices: ['NO_KEYS'],
-      trial_duration: 800,
-      response_ends_trial: false
-    })
+    timeline.push(practiceFeedbackTimeline(jsPsych, practiceState, practiceCount))
   }
+
+  timeline.push(practiceEndTimeline(practiceState, practiceCount, params.run_pretest === 1))
 
   return timeline
 }

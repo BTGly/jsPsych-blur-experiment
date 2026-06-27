@@ -18,56 +18,79 @@ body {
   text-align: center;
 }
 .fixation {
-  font-size: 48px;
+  font-size: 64px;
   color: #fff;
 }
+.stimulus-frame {
+  position: relative;
+  width: 320px;
+  height: 390px;
+  max-width: 80vmin;
+  max-height: 86vmin;
+  margin: 0 auto;
+}
+.choice-label {
+  position: absolute;
+  top: 0;
+  font-size: 42px;
+  line-height: 1;
+  color: #fff;
+  font-weight: 700;
+}
+.choice-label-left {
+  left: 0;
+}
+.choice-label-right {
+  right: 0;
+}
 .stimulus-image {
-  max-width: 80vw;
-  max-height: 80vh;
+  position: absolute;
+  left: 0;
+  top: 70px;
+  width: 320px;
+  height: 320px;
+  max-width: 80vmin;
+  max-height: 80vmin;
+  object-fit: contain;
+  image-rendering: auto;
   display: block;
   margin: 0 auto;
 }
 .instruction-text {
-  font-size: 24px;
+  font-size: 28px;
   line-height: 1.6;
-  max-width: 800px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 20px;
+  white-space: pre-wrap;
 }
-.response-hint {
-  font-size: 20px;
-  color: #aaa;
-  margin-top: 20px;
-}
-.feedback-correct {
-  color: #4caf50;
-  font-size: 28px;
-}
-.feedback-incorrect {
-  color: #f44336;
-  font-size: 28px;
-}
-.feedback-timeout {
-  color: #ff9800;
-  font-size: 28px;
+.feedback-text {
+  font-size: 26px;
+  line-height: 1.45;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+  text-align: center;
+  white-space: pre-wrap;
 }
 .block-feedback {
-  font-size: 22px;
+  font-size: 28px;
   line-height: 1.8;
+  white-space: pre-wrap;
 }
 .param-form label {
   display: block;
-  font-size: 20px;
+  font-size: 22px;
   margin: 12px 0;
 }
 .param-form input {
-  font-size: 18px;
+  font-size: 20px;
   padding: 6px 10px;
   margin-left: 10px;
   width: 120px;
 }
 .param-form button {
-  font-size: 22px;
+  font-size: 24px;
   padding: 10px 40px;
   margin-top: 20px;
   cursor: pointer;

@@ -125,7 +125,13 @@ subjects/
 POST https://exp-api.cognitive-testing.cn/api/upload-session
 ```
 
-注意：`exp-api.cognitive-testing.cn` 需要先添加 DNS A 记录指向服务器 IP，然后再签发 HTTPS 证书。证书完成前，GitHub Pages 页面不能可靠跨域上传到该域名。
+前端默认 API 基础地址：
+
+```text
+https://exp-api.cognitive-testing.cn
+```
+
+注意：GitHub Pages 页面是 HTTPS，上传 API 也必须使用 HTTPS，否则浏览器会拦截 mixed content。
 
 ## 部署
 

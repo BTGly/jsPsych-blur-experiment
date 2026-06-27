@@ -1,7 +1,9 @@
-export const DEFAULT_UPLOAD_ENDPOINT = 'https://exp-api.cognitive-testing.cn/api/upload-session'
+export const DEFAULT_UPLOAD_API_BASE = 'https://exp-api.cognitive-testing.cn'
 
 export function getUploadEndpoint() {
-  return window.__UPLOAD_ENDPOINT || DEFAULT_UPLOAD_ENDPOINT
+  if (window.__UPLOAD_ENDPOINT) return window.__UPLOAD_ENDPOINT
+  const baseUrl = window.__UPLOAD_API_BASE || DEFAULT_UPLOAD_API_BASE
+  return `${baseUrl.replace(/\/+$/, '')}/api/upload-session`
 }
 
 export async function sha256Blob(blob) {

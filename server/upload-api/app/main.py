@@ -1,0 +1,252 @@
+import hashlib
+import json
+import os
+import re
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+
+DATA_DIR = Path('/opt/blur-exp/data')
+STORAGE_DIR = Path('/opt/blur-exp/storage')
+DB_PATH = DATA_DIR / 'experiment.sqlite3'
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+ALLOWED_ORIGINS = [
+    'https://btgly.github.io',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
+UPLOAD_TOKEN = os.environ.get('UPLOAD_TOKEN', '')
+
+app = FastAPI(title='Blur Experiment Upload API')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r'https?://(localhost|127\.0\.0\.1)(:\d+)?',
+    allow_credentials=False,
+    allow_methods=['GET', 'POST'],
+    allow_headers=['*'],
+)
+
+
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def safe_id(value: str, default: str = 'UNKNOWN') -> str:
+    value = (value or '').strip()
+    if not value:
+        return default
+    value = re.sub(r'[^A-Za-z0-9_-]', '_', value)
+    return value[:120] or default
+
+
+def init_db() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS experiment_sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              session_id TEXT NOT NULL UNIQUE,
+              subject_id TEXT NOT NULL,
+              participant TEXT NOT NULL,
+              run_pretest INTEGER,
+              start_group INTEGER,
+              end_group INTEGER,
+              trial_count INTEGER,
+              valid_trial_count INTEGER,
+              abort_reason TEXT,
+              zip_path TEXT NOT NULL,
+              zip_size_bytes INTEGER NOT NULL,
+              sha256_client TEXT,
+              sha256_server TEXT NOT NULL,
+              upload_status TEXT NOT NULL,
+              client_user_agent TEXT,
+              app_version TEXT,
+              created_at TEXT NOT NULL,
+              uploaded_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sessions_subject
+            ON experiment_sessions(subject_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sessions_uploaded_at
+            ON experiment_sessions(uploaded_at)
+            """
+        )
+        conn.commit()
+
+
+@app.on_event('startup')
+def startup() -> None:
+    init_db()
+
+
+@app.get('/health')
+def health():
+    return {'ok': True, 'time': now_utc_iso()}
+
+
+@app.post('/api/upload-session')
+async def upload_session(
+    file: UploadFile = File(...),
+    metadata: str = Form(...),
+    x_upload_token: str | None = Header(default=None),
+    user_agent: str | None = Header(default=None),
+):
+    if not UPLOAD_TOKEN:
+        raise HTTPException(status_code=500, detail='UPLOAD_TOKEN is not configured')
+
+    if x_upload_token != UPLOAD_TOKEN:
+        raise HTTPException(status_code=401, detail='Invalid upload token')
+
+    try:
+        meta = json.loads(metadata)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail='metadata is not valid JSON') from exc
+
+    participant = safe_id(str(meta.get('participant', 'UNKNOWN')))
+    subject_id = safe_id(str(meta.get('subject_id', participant)))
+    session_id = safe_id(str(meta.get('session_id', '')))
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail='session_id is required')
+
+    filename = file.filename or ''
+    if not filename.lower().endswith('.zip'):
+        raise HTTPException(status_code=400, detail='Only .zip upload is accepted')
+
+    run_pretest = int(meta.get('run_pretest', 0) or 0)
+    start_group = int(meta.get('start_group', 0) or 0)
+    end_group = int(meta.get('end_group', 0) or 0)
+    trial_count = int(meta.get('trial_count', 0) or 0)
+    valid_trial_count = int(meta.get('valid_trial_count', 0) or 0)
+    abort_reason = str(meta.get('abort_reason', '') or '')
+    sha256_client = str(meta.get('sha256', '') or '')
+    app_version = str(meta.get('app_version', '') or '')
+
+    session_dir = STORAGE_DIR / 'subjects' / subject_id / 'sessions' / session_id
+    raw_dir = session_dir / 'raw'
+    if session_dir.exists():
+        raise HTTPException(status_code=409, detail='session_id already exists')
+
+    raw_dir.mkdir(parents=True, exist_ok=False)
+
+    zip_path = raw_dir / f'{session_id}.zip'
+    hasher = hashlib.sha256()
+    size = 0
+
+    try:
+        with zip_path.open('wb') as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail='file too large')
+                hasher.update(chunk)
+                out.write(chunk)
+    except Exception:
+        if zip_path.exists():
+            zip_path.unlink()
+        try:
+            raw_dir.rmdir()
+            session_dir.rmdir()
+        except OSError:
+            pass
+        raise
+
+    sha256_server = hasher.hexdigest()
+    if sha256_client and sha256_client != sha256_server:
+        zip_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail='sha256 mismatch')
+
+    uploaded_at = now_utc_iso()
+    created_at = str(meta.get('created_at', '') or uploaded_at)
+
+    manifest = {
+        'subject_id': subject_id,
+        'participant': participant,
+        'session_id': session_id,
+        'run_pretest': run_pretest,
+        'start_group': start_group,
+        'end_group': end_group,
+        'trial_count': trial_count,
+        'valid_trial_count': valid_trial_count,
+        'abort_reason': abort_reason,
+        'zip_path': str(zip_path),
+        'zip_size_bytes': size,
+        'sha256_client': sha256_client,
+        'sha256_server': sha256_server,
+        'app_version': app_version,
+        'created_at': created_at,
+        'uploaded_at': uploaded_at,
+    }
+    (session_dir / 'manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO experiment_sessions (
+                  session_id, subject_id, participant,
+                  run_pretest, start_group, end_group,
+                  trial_count, valid_trial_count, abort_reason,
+                  zip_path, zip_size_bytes,
+                  sha256_client, sha256_server,
+                  upload_status, client_user_agent, app_version,
+                  created_at, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    subject_id,
+                    participant,
+                    run_pretest,
+                    start_group,
+                    end_group,
+                    trial_count,
+                    valid_trial_count,
+                    abort_reason,
+                    str(zip_path),
+                    size,
+                    sha256_client,
+                    sha256_server,
+                    'uploaded',
+                    user_agent,
+                    app_version,
+                    created_at,
+                    uploaded_at,
+                ),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail='session_id already exists') from exc
+
+    return {
+        'ok': True,
+        'session_id': session_id,
+        'subject_id': subject_id,
+        'zip_size_bytes': size,
+        'sha256': sha256_server,
+        'uploaded_at': uploaded_at,
+    }

@@ -1,0 +1,14 @@
+services:
+  upload-api:
+    build: .
+    container_name: blur-exp-upload-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /opt/blur-exp/data:/opt/blur-exp/data
+      - /opt/blur-exp/storage:/opt/blur-exp/storage
+    ports:
+      - "127.0.0.1:8000:8000"
+    mem_limit: 256m
+    cpus: "0.30"

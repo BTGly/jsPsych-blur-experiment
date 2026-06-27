@@ -62,8 +62,15 @@ src/data/                   数据 schema、summary、CSV/ZIP 导出
 - `practice_count`：练习 trial 数，默认 24，可设为 0 跳过练习。
 - `start_group` / `end_group`：正式实验运行轮次，范围 1-11，支持分段实验。
 - `run_pretest`：是否运行预实验。
+- `upload_code`：服务器上传授权码。留空时只下载本地 ZIP，不上传。
 
 如果一个被试分多次完成正式实验，可固定同一个被试编号，并设置不同轮次范围，例如 `1-2`、`3-5`、`6-8`、`9-11`。
+
+也可以用 URL 参数预填，例如：
+
+```text
+https://btgly.github.io/jsPsych-blur-experiment/?participant=S001&start_group=1&end_group=2&run_pretest=1
+```
 
 ## 当前数据保存方式
 
@@ -85,51 +92,40 @@ ZIP 内包含：
 - `formal_block_*.csv` 保存正式实验生成出来的 block/trial 计划和抽图结果。
 - `calibration_summary.csv` 和 `pretest_alpha_summary.csv` 保存预实验校准结果。
 
-## 后端/数据库建议
+## 自动上传后端
 
-如果要自动集中收集数据，建议采用“对象文件存储 + 数据库索引”的方式，而不是一开始把所有 trial 都拆进数据库。
+当前仓库包含一个最小 FastAPI 上传后端，位于 `server/upload-api/`。设计原则是“ZIP 文件落盘 + SQLite 索引”：浏览器结束实验后先下载本地 ZIP，再在填写 `upload_code` 时把同一个 ZIP 上传到服务器。
 
-推荐服务端目录结构：
+已部署结构建议：
+
+```text
+/opt/blur-exp/
+  app/                    FastAPI 代码
+  data/experiment.sqlite3 SQLite 索引
+  storage/subjects/       每个被试的 ZIP 和 manifest
+  docker-compose.yml
+  .env                    UPLOAD_TOKEN，不能提交到 GitHub
+```
+
+服务器保存结构：
 
 ```text
 subjects/
   S001/
     sessions/
-      2026-06-27_15h30m20s/
+      S001_2026-06-27_15h30m20s_start1_end2/
         raw/
-          raw_data.csv
-          practice_trials.csv
-          pretest_trials.csv
-          formal_trials.csv
-        generated/
-          formal_block_01.csv
-          ...
-          formal_block_11.csv
-          formal_block_distribution_summary.csv
-        calibration/
-          pretest_alpha_summary.csv
-          calibration_summary.csv
-        package/
-          S001_experiment_2026-06-27_15h30m20s.zip
+          S001_2026-06-27_15h30m20s_start1_end2.zip
+        manifest.json
 ```
 
-数据库只保存索引和状态：
-
-```text
-subjects: subject_id, upload_code, note
-sessions: session_id, subject_id, started_at, ended_at, status, abort_reason
-files: session_id, file_type, storage_path, checksum, uploaded_at
-```
-
-前端接口可设计为：
+上传接口：
 
 ```http
-POST /api/sessions/start
-POST /api/sessions/{session_id}/upload
-POST /api/sessions/{session_id}/finish
+POST https://exp-api.cognitive-testing.cn/api/upload-session
 ```
 
-上传成功后页面显示“数据已上传完成”。上传失败时仍保留本地 ZIP 下载作为兜底。正式部署时不要只依赖被试编号鉴权，建议给每个被试一个 `upload_code`，防止他人伪造上传。
+注意：`exp-api.cognitive-testing.cn` 需要先添加 DNS A 记录指向服务器 IP，然后再签发 HTTPS 证书。证书完成前，GitHub Pages 页面不能可靠跨域上传到该域名。
 
 ## 部署
 

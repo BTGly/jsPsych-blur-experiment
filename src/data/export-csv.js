@@ -7,6 +7,10 @@ import {
 export function downloadCSV(data, fields, filename) {
   const csv = generateCSV(data, fields)
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  downloadBlob(blob, filename)
+}
+
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -17,7 +21,7 @@ export function downloadCSV(data, fields, filename) {
   URL.revokeObjectURL(url)
 }
 
-export async function downloadAllData(subjectId, rawData, summaries, config) {
+export async function buildAllDataZip(subjectId, rawData, summaries, config) {
   const zip = new JSZip()
 
   const dateStr = config.dateStr || 'unknown'
@@ -51,13 +55,12 @@ export async function downloadAllData(subjectId, rawData, summaries, config) {
     }
   }
 
-  const content = await zip.generateAsync({ type: 'blob' })
-  const url = URL.createObjectURL(content)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${subjectId}_experiment_${dateStr}.zip`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const blob = await zip.generateAsync({ type: 'blob' })
+  const filename = `${subjectId}_experiment_${dateStr}.zip`
+  return { blob, filename }
+}
+
+export async function downloadAllData(subjectId, rawData, summaries, config) {
+  const { blob, filename } = await buildAllDataZip(subjectId, rawData, summaries, config)
+  downloadBlob(blob, filename)
 }

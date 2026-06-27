@@ -9,7 +9,8 @@ import { selectAlphas, FORMAL_PLAN, P8_WINDOWS } from './calibration/select-alph
 import { generateFormalTrials, splitBlocks } from './calibration/formal-generator.js'
 import { computePretestAlphaSummary, buildCalibrationSummary, computeExpectedMetrics } from './data/summaries.js'
 import { verifyPretestRecords } from './qc/checks.js'
-import { downloadAllData, downloadCSV } from './data/export-csv.js'
+import { buildAllDataZip, downloadBlob, downloadCSV } from './data/export-csv.js'
+import { getUploadEndpoint, sha256Blob, uploadSessionZip } from './data/upload.js'
 import { RAW_DATA_FIELDS } from './data/schemas.js'
 
 import {
@@ -353,21 +354,90 @@ function triggerDownload(jsPsych, abortInfo = null) {
   const params = readFormParams()
   const dateStr = getDateStr()
 
-  setTimeout(() => {
-    downloadAllData(params.participant, allData, {
+  setTimeout(async () => {
+    const msgEl = document.querySelector('.instruction-text')
+    const summaries = {
       pretestAlphaSummary: collector.pretestAlphaSummary || [],
       calibrationSummary: collector.calibrationSummaryRows || [],
       blockDistribution: collector.blockDistributionRows || [],
       formalBlocks: collector.formalBlocks || {}
-    }, { dateStr }).then(() => {
+    }
+
+    try {
+      const { blob, filename } = await buildAllDataZip(params.participant, allData, summaries, { dateStr })
+      downloadBlob(blob, filename)
       console.log('Data download complete.')
-      const msgEl = document.querySelector('.instruction-text')
+
       if (msgEl) {
-        msgEl.innerHTML = '实验结束！感谢您的参与。<br><br>数据已下载完成。<br><br>你可以关闭此页面。'
+        msgEl.innerHTML = '实验结束！感谢您的参与。<br><br>数据已下载到本机。<br><br>正在上传到服务器...'
       }
-    }).catch(err => {
-      console.error('Download failed, saving raw CSV:', err)
+
+      if (params.upload_code) {
+        try {
+          const sha256 = await sha256Blob(blob)
+          const metadata = buildUploadMetadata(params, allData, abortInfo, dateStr, sha256)
+          const uploadResult = await uploadSessionZip({
+            blob,
+            filename,
+            metadata,
+            uploadCode: params.upload_code,
+            endpoint: getUploadEndpoint()
+          })
+          console.log('Data upload complete:', uploadResult)
+          if (msgEl) {
+            msgEl.innerHTML = '实验结束！感谢您的参与。<br><br>数据已下载到本机，并已上传到服务器。<br><br>你可以关闭此页面。'
+          }
+        } catch (uploadErr) {
+          console.error('Upload failed:', uploadErr)
+          if (msgEl) {
+            msgEl.innerHTML = `实验结束！感谢您的参与。<br><br>数据已下载到本机，但上传服务器失败。<br><br>请保留刚刚下载的 ZIP 文件。<br><br>${escapeHtml(uploadErr.message || uploadErr)}`
+          }
+        }
+      } else if (msgEl) {
+        msgEl.innerHTML = '实验结束！感谢您的参与。<br><br>数据已下载到本机。<br><br>未填写上传授权码，因此没有上传到服务器。'
+      }
+    } catch (err) {
+      console.error('ZIP download failed, saving raw CSV:', err)
       downloadCSV(allData, RAW_DATA_FIELDS, `${params.participant}_raw_data_${dateStr}.csv`)
-    })
+      if (msgEl) {
+        msgEl.innerHTML = `实验结束，但 ZIP 打包失败。<br><br>已尝试下载 raw CSV 作为兜底。<br><br>${escapeHtml(err.message || err)}`
+      }
+    }
   }, 100)
+}
+
+function buildUploadMetadata(params, allData, abortInfo, dateStr, sha256) {
+  const trialRows = allData.filter(row => row.phase && row.choice_digit !== undefined)
+  const validTrialRows = trialRows.filter(row => parseInt(row.response_timeout) !== 1)
+
+  return {
+    session_id: safeId(`${params.participant}_${dateStr}_start${params.start_group}_end${params.end_group}`),
+    participant: params.participant,
+    subject_id: params.participant,
+    run_pretest: params.run_pretest,
+    start_group: params.start_group,
+    end_group: params.end_group,
+    trial_count: trialRows.length,
+    valid_trial_count: validTrialRows.length,
+    abort_reason: abortInfo?.abort_reason || '',
+    sha256,
+    created_at: new Date().toISOString(),
+    app_version: 'web-static'
+  }
+}
+
+function safeId(value) {
+  return String(value || 'UNKNOWN')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .slice(0, 120) || 'UNKNOWN'
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }

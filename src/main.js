@@ -6,7 +6,8 @@ import { preloadImages } from './preload.js'
 import { fitLogisticGrid } from './calibration/logistic.js'
 import { buildMonotonicP8Curve } from './calibration/monotonic.js'
 import { selectAlphas, FORMAL_PLAN, P8_WINDOWS } from './calibration/select-alpha.js'
-import { generateFormalTrials, splitBlocks } from './calibration/formal-generator.js'
+import { buildFormalSchedule } from './calibration/formal-schedule.js'
+import { loadFormalImagePool } from './data/formal-pool.js'
 import { computePretestAlphaSummary, buildCalibrationSummary, computeExpectedMetrics } from './data/summaries.js'
 import { verifyPretestRecords } from './qc/checks.js'
 import { buildAllDataZip, downloadBlob, downloadCSV } from './data/export-csv.js'
@@ -53,14 +54,31 @@ async function startExperiment() {
   let calibrationSummaryRows = []
   let pretestAlphaSummaryRows = []
   let pretestRecords = []
+  let scheduleSource = 'none'
 
-  // Check if subject already has calibration on server
+  // Check if subject already has calibration + formal schedule on server
   let existingCalibration = null
+  let scheduleFromServer = null
   if (params.upload_code) {
     target.innerHTML = '<div class="instruction-text">正在检查校准数据...</div>'
     existingCalibration = await fetchStoredCalibration(params.participant)
-    if (existingCalibration?.selected) {
-      console.log('Found stored calibration for', params.participant, '— skipping pretest')
+    if (existingCalibration?.formal_schedule?.formalBlocks) {
+      scheduleFromServer = existingCalibration.formal_schedule
+      console.log('Using stored formal schedule for', params.participant)
+    } else if (existingCalibration?.selected && !existingCalibration?.formal_schedule) {
+      // Legacy cache — block and inform
+      target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+        <h2>检测到旧版校准缓存</h2>
+        <p>该被试编号（${escapeHtml(params.participant)}）的校准缓存来自旧版本，缺少正式实验排程。</p>
+        <p>请联系实验负责人清除旧缓存后重新开始。</p>
+        <p style="color:#888;font-size:14px;">（按 Esc 或关闭全屏可退出）</p>
+      </div>`
+      const btn = document.createElement('button')
+      btn.textContent = '重新开始'
+      btn.onclick = () => location.reload()
+      target.querySelector('.instruction-text')?.appendChild(document.createElement('br'))
+      target.querySelector('.instruction-text')?.appendChild(btn)
+      return
     }
   }
   target.innerHTML = ''
@@ -149,10 +167,10 @@ async function startExperiment() {
 
   const practiceTimeline = await buildPracticeTimeline(jsPsych)
 
-  // Build pretest only if no stored calibration
+  // Build pretest only if no stored formal schedule
   let pretestTimeline = []
-  if (existingCalibration?.selected) {
-    console.log('Using stored alphas:', existingCalibration.selected)
+  if (scheduleFromServer) {
+    console.log('Skipping pretest — using stored formal schedule')
     pretestRecords = []
   } else {
     const pretestResult = await buildPretestTimeline(jsPsych)
@@ -185,8 +203,10 @@ async function startExperiment() {
     let selectedInfo = null
     const pretestUsedPaths = new Set()
     const finalTimeline = []
+    let formalSchedule = scheduleFromServer
 
     if (pretestRecords.length > 0) {
+      // === FIRST RUN: pretest → calibrate → build schedule → upload ===
       const pretestSummary = computePretestAlphaSummary(pretestRecords)
       pretestAlphaSummaryRows = pretestSummary.summaryRows
       const { valid } = verifyPretestRecords(pretestRecords)
@@ -201,9 +221,9 @@ async function startExperiment() {
           if (r.image_path) pretestUsedPaths.add(normalizePath(r.image_path))
         }
 
-        const alphaToImages = await loadFormalImagePool(pretestUsedPaths)
         const selectionResult = selectAlphas(
-          pretestSummary.alphaCounts, alphaToImages, mu, sigma, monoPredict
+          pretestSummary.alphaCounts, await loadFormalImagePool(pretestUsedPaths),
+          mu, sigma, monoPredict
         )
         selected = selectionResult.selected
         selectedInfo = selectionResult.selectedInfo
@@ -213,20 +233,50 @@ async function startExperiment() {
         const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
         calibrationSummaryRows = buildCalibrationSummary(selectedInfo, mu, sigma, nll, expectedMetrics, FORMAL_PLAN)
 
-        // Upload calibration so subject can skip pretest next time
-        // 保护规则: 非 TEST 被试已有校准时不覆盖（需手动清除）
+        // Build formal schedule FIRST, then upload
+        formalSchedule = await buildFormalSchedule({
+          selected,
+          pretestUsedPaths,
+          subjectSeed
+        })
+        formalBlocks = formalSchedule.formalBlocks
+        blockDistributionRows = formalSchedule.blockDistributionRows
+        scheduleSource = 'newly_generated_after_pretest'
+        console.log('Formal schedule generated:', formalBlocks ? Object.keys(formalBlocks).length : 0, 'blocks')
+
+        // Upload full artifact (calibration + formal schedule)
         if (params.upload_code) {
-          const existingCal = await fetchStoredCalibration(params.participant)
           const isTestSubject = /^TEST_/i.test(params.participant)
-          if (existingCal?.selected && !isTestSubject) {
-            console.log('Calibration already exists for', params.participant, '— skipping upload to protect existing data')
+          if (!isTestSubject) {
+            const existingCal = await fetchStoredCalibration(params.participant)
+            if (existingCal?.formal_schedule?.formalBlocks) {
+              console.log('Calibration already exists for', params.participant, '— skipping upload to protect existing data')
+            } else {
+              const artifact = {
+                schema_version: 2,
+                subject_id: params.participant,
+                stored_at: new Date().toISOString(),
+                calibration: { mu, sigma, nll, selected, selectedInfo, pretestAlphaSummaryRows },
+                pretest: { pretestUsedPaths: [...pretestUsedPaths] },
+                formal_schedule: formalSchedule,
+                provenance: { app_version: 'web-static', generator: 'buildFormalSchedule', created_at: new Date().toISOString() }
+              }
+              uploadCalibration(params.participant, artifact, params.upload_code)
+                .catch(err => console.warn('Calibration upload failed:', err))
+            }
           } else {
-            uploadCalibration(params.participant, {
-              mu, sigma, nll,
-              selected,
-              selectedInfo,
-              pretestAlphaSummaryRows
-            }, params.upload_code).catch(err => console.warn('Calibration upload failed:', err))
+            // TEST subject: always upload/overwrite
+            const artifact = {
+              schema_version: 2,
+              subject_id: params.participant,
+              stored_at: new Date().toISOString(),
+              calibration: { mu, sigma, nll, selected, selectedInfo, pretestAlphaSummaryRows },
+              pretest: { pretestUsedPaths: [...pretestUsedPaths] },
+              formal_schedule: formalSchedule,
+              provenance: { app_version: 'web-static', generator: 'buildFormalSchedule', created_at: new Date().toISOString() }
+            }
+            uploadCalibration(params.participant, artifact, params.upload_code)
+              .catch(err => console.warn('Calibration upload failed:', err))
           }
         }
       } else {
@@ -240,36 +290,29 @@ async function startExperiment() {
         </div>`
         return
       }
-    } else if (existingCalibration?.selected) {
-      // Reuse stored calibration — skip pretest
-      selected = existingCalibration.selected
-      selectedInfo = existingCalibration.selectedInfo
-      pretestAlphaSummaryRows = existingCalibration.pretestAlphaSummaryRows || []
+    } else if (scheduleFromServer) {
+      // === RETURNING SUBJECT: read only, never regenerate ===
+      formalBlocks = scheduleFromServer.formalBlocks
+      blockDistributionRows = scheduleFromServer.blockDistributionRows
+      scheduleSource = 'server_calibration_cache'
+      selected = existingCalibration.calibration.selected
+      selectedInfo = existingCalibration.calibration.selectedInfo
+      pretestAlphaSummaryRows = existingCalibration.calibration.pretestAlphaSummaryRows || []
       const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
       const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
       calibrationSummaryRows = buildCalibrationSummary(
         selectedInfo,
-        existingCalibration.mu ?? null,
-        existingCalibration.sigma ?? null,
-        existingCalibration.nll ?? null,
+        existingCalibration.calibration.mu ?? null,
+        existingCalibration.calibration.sigma ?? null,
+        existingCalibration.calibration.nll ?? null,
         expectedMetrics,
         FORMAL_PLAN
       )
       console.log('Using stored calibration for', params.participant)
     }
 
-    if (selected && selectedInfo) {
+    if (selected && selectedInfo && formalBlocks && Object.keys(formalBlocks).length > 0) {
       const formalIntro = formalIntroTimeline()
-      const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
-      const alphaToImages = await loadFormalImagePool(pretestUsedPaths)
-      const formalTrials = generateFormalTrials(
-        selected, alphaToImages, pretestUsedPaths, totalPlannedTrials, subjectSeed
-      )
-      console.log('Formal trials generated:', formalTrials.length)
-
-      const blockResult = splitBlocks(formalTrials, 11, 100, subjectSeed)
-      formalBlocks = blockResult.formalBlocks
-      blockDistributionRows = blockResult.blockDistributionRows
 
       finalTimeline.push(...formalIntro)
 
@@ -290,7 +333,10 @@ async function startExperiment() {
       calibrationSummaryRows,
       blockDistributionRows,
       formalBlocks,
-      pretestAlphaSummary: pretestAlphaSummaryRows
+      pretestAlphaSummary: pretestAlphaSummaryRows,
+      scheduleSource,
+      startGroup: params.start_group,
+      endGroup: params.end_group
     }
 
     finalTimeline.push(endingTimeline(() => {
@@ -318,27 +364,6 @@ async function requestFullscreen() {
   }
 }
 
-async function loadFormalImagePool(pretestUsedPaths) {
-  const masterManifest = await loadCSV('assets/stimuli_master_pool/manifest.csv')
-  const alphaToImages = {}
-  for (const row of masterManifest) {
-    const a = parseFloat(parseFloat(row.alpha).toFixed(2))
-    if (!alphaToImages[a]) alphaToImages[a] = []
-    const relPath = 'stimuli_master_pool/' + row.alpha_dir + '/' + row.filename
-    alphaToImages[a].push({
-      rank: parseInt(row.rank),
-      image_path: relPath
-    })
-  }
-  for (const a of Object.keys(alphaToImages)) {
-    alphaToImages[a].sort((x, y) => x.rank - y.rank)
-    alphaToImages[a] = alphaToImages[a].filter(item =>
-      !pretestUsedPaths.has(normalizePath(item.image_path))
-    )
-  }
-  return alphaToImages
-}
-
 function showStartupError(err) {
   console.error('Experiment setup failed:', err)
   document.body.innerHTML = `<div style="color:red;padding:40px;font-size:20px;">
@@ -363,7 +388,10 @@ function triggerDownload(jsPsych, abortInfo = null) {
       pretestAlphaSummary: collector.pretestAlphaSummary || [],
       calibrationSummary: collector.calibrationSummaryRows || [],
       blockDistribution: collector.blockDistributionRows || [],
-      formalBlocks: collector.formalBlocks || {}
+      formalBlocks: collector.formalBlocks || {},
+      scheduleSource: collector.scheduleSource || 'none',
+      startGroup: collector.startGroup || params.start_group,
+      endGroup: collector.endGroup || params.end_group
     }
 
     try {
@@ -484,3 +512,5 @@ async function uploadCalibration(subjectId, data, uploadCode) {
     return false
   }
 }
+
+

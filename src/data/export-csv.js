@@ -55,6 +55,17 @@ export async function buildAllDataZip(subjectId, rawData, summaries, config) {
     }
   }
 
+  // Audit provenance
+  const provenance = {
+    source: summaries.scheduleSource || 'none',
+    schema_version: 2,
+    subject_id: subjectId,
+    start_group: summaries.startGroup || null,
+    end_group: summaries.endGroup || null,
+    generated_at: dateStr
+  }
+  zip.file(`${subjectId}_formal_schedule_source.json`, JSON.stringify(provenance, null, 2))
+
   const blob = await zip.generateAsync({ type: 'blob' })
   const filename = `${subjectId}_experiment_${dateStr}.zip`
   return { blob, filename }

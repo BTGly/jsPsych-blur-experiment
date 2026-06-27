@@ -8,12 +8,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request as _Request
 
 
 DATA_DIR = Path('/opt/blur-exp/data')
 STORAGE_DIR = Path('/opt/blur-exp/storage')
 DB_PATH = DATA_DIR / 'experiment.sqlite3'
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 ALLOWED_ORIGINS = [
     'https://btgly.github.io',
@@ -23,14 +24,14 @@ ALLOWED_ORIGINS = [
 
 UPLOAD_TOKEN = os.environ.get('UPLOAD_TOKEN', '')
 
-app = FastAPI(title='Blur Experiment Upload API')
+app = FastAPI(title="Blur Experiment Upload API", docs_url=None, redoc_url=None, openapi_url=None)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_origin_regex=r'https?://(localhost|127\.0\.0\.1)(:\d+)?',
     allow_credentials=False,
-    allow_methods=['GET', 'POST'],
+    allow_methods=['GET', 'POST', 'PUT', 'OPTIONS'],
     allow_headers=['*'],
 )
 
@@ -109,6 +110,29 @@ def _calibration_path(subject_id: str) -> Path:
     return STORAGE_DIR / 'subjects' / sid / 'calibration.json'
 
 
+def _validate_formal_schedule(body: dict) -> None:
+    """Validate calibration v2 formal_schedule before storing."""
+    if body.get('schema_version') != 2:
+        raise HTTPException(status_code=400, detail='schema_version=2 required')
+
+    formal = body.get('formal_schedule') or {}
+    blocks = formal.get('formalBlocks') or {}
+
+    if not isinstance(blocks, dict) or len(blocks) != 11:
+        raise HTTPException(status_code=400, detail='formalBlocks must contain exactly 11 blocks')
+
+    total = 0
+    for b in range(1, 12):
+        key = str(b)
+        trials = blocks.get(key)
+        if not isinstance(trials, list) or len(trials) != 100:
+            raise HTTPException(status_code=400, detail=f'block {b} must contain exactly 100 trials')
+        total += len(trials)
+
+    if total != 1100:
+        raise HTTPException(status_code=400, detail='formal schedule total trials must be 1100')
+
+
 @app.get('/api/subject/{subject_id}/calibration')
 def get_calibration(subject_id: str):
     """Return stored calibration for a subject (no auth needed — read-only)."""
@@ -118,15 +142,13 @@ def get_calibration(subject_id: str):
     return json.loads(path.read_text(encoding='utf-8'))
 
 
-from fastapi import Request as _Request
-
 @app.put('/api/calibration/{subject_id}')
 async def store_calibration(
     subject_id: str,
     request: _Request,
     x_upload_token: str | None = Header(default=None),
 ):
-    """Store calibration data after pretest completes (auth required)."""
+    """Store calibration v2 artifact after pretest completes (auth required)."""
     if not UPLOAD_TOKEN:
         raise HTTPException(status_code=500, detail='UPLOAD_TOKEN is not configured')
     if x_upload_token != UPLOAD_TOKEN:
@@ -137,10 +159,22 @@ async def store_calibration(
     except Exception:
         raise HTTPException(status_code=400, detail='Invalid JSON body')
 
-    body['subject_id'] = safe_id(subject_id)
+    # Validate schema version and formal schedule integrity
+    _validate_formal_schedule(body)
+
+    # Prevent overwriting existing calibration for non-TEST subjects
+    path = _calibration_path(subject_id)
+    sid = safe_id(subject_id)
+    is_test = sid.startswith('TEST_')
+    if path.exists() and not is_test:
+        raise HTTPException(
+            status_code=409,
+            detail='calibration already exists for this subject, delete manually to reset'
+        )
+
+    body['subject_id'] = sid
     body['stored_at'] = now_utc_iso()
 
-    path = _calibration_path(subject_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding='utf-8')
 

@@ -54,6 +54,17 @@ async function startExperiment() {
   let pretestAlphaSummaryRows = []
   let pretestRecords = []
 
+  // Check if subject already has calibration on server
+  let existingCalibration = null
+  if (params.upload_code) {
+    target.innerHTML = '<div class="instruction-text">正在检查校准数据...</div>'
+    existingCalibration = await fetchStoredCalibration(params.participant)
+    if (existingCalibration?.selected) {
+      console.log('Found stored calibration for', params.participant, '— skipping pretest')
+    }
+  }
+  target.innerHTML = ''
+
   const jsPsych = initJsPsych({
     display_element: target,
     show_progress_bar: false,
@@ -138,9 +149,16 @@ async function startExperiment() {
 
   const practiceTimeline = await buildPracticeTimeline(jsPsych)
 
-  const pretestResult = await buildPretestTimeline(jsPsych)
-  const pretestTimeline = pretestResult.timeline
-  pretestRecords = pretestResult.pretestRecords
+  // Build pretest only if no stored calibration
+  let pretestTimeline = []
+  if (existingCalibration?.selected) {
+    console.log('Using stored alphas:', existingCalibration.selected)
+    pretestRecords = []
+  } else {
+    const pretestResult = await buildPretestTimeline(jsPsych)
+    pretestTimeline = pretestResult.timeline
+    pretestRecords = pretestResult.pretestRecords
+  }
 
   const initialTimeline = [welcomeTrial]
 
@@ -194,6 +212,16 @@ async function startExperiment() {
         const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
         const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
         calibrationSummaryRows = buildCalibrationSummary(selectedInfo, mu, sigma, nll, expectedMetrics, FORMAL_PLAN)
+
+        // Upload calibration so subject can skip pretest next time
+        if (params.upload_code) {
+          uploadCalibration(params.participant, {
+            mu, sigma, nll,
+            selected,
+            selectedInfo,
+            pretestAlphaSummaryRows
+          }, params.upload_code).catch(err => console.warn('Calibration upload failed:', err))
+        }
       } else {
         console.warn('Pretest invalid, skipping formal experiment')
         target.innerHTML = `<div class="instruction-text">
@@ -205,6 +233,22 @@ async function startExperiment() {
         </div>`
         return
       }
+    } else if (existingCalibration?.selected) {
+      // Reuse stored calibration — skip pretest
+      selected = existingCalibration.selected
+      selectedInfo = existingCalibration.selectedInfo
+      pretestAlphaSummaryRows = existingCalibration.pretestAlphaSummaryRows || []
+      const totalPlannedTrials = FORMAL_PLAN.reduce((s, c) => s + parseInt(c.n_trials), 0)
+      const expectedMetrics = computeExpectedMetrics(selectedInfo, totalPlannedTrials, FORMAL_PLAN)
+      calibrationSummaryRows = buildCalibrationSummary(
+        selectedInfo,
+        existingCalibration.mu ?? null,
+        existingCalibration.sigma ?? null,
+        existingCalibration.nll ?? null,
+        expectedMetrics,
+        FORMAL_PLAN
+      )
+      console.log('Using stored calibration for', params.participant)
     }
 
     if (selected && selectedInfo) {
@@ -392,4 +436,44 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+// ---- Calibration cache helpers ----
+
+const CALIBRATION_API_BASE = 'https://exp-api.cognitive-testing.cn'
+
+async function fetchStoredCalibration(subjectId) {
+  try {
+    const url = `${CALIBRATION_API_BASE}/api/subject/${encodeURIComponent(subjectId)}/calibration`
+    const resp = await fetch(url)
+    if (resp.status === 404) return null
+    if (!resp.ok) {
+      console.warn('Calibration fetch failed:', resp.status)
+      return null
+    }
+    return await resp.json()
+  } catch (err) {
+    console.warn('Calibration fetch error:', err)
+    return null
+  }
+}
+
+async function uploadCalibration(subjectId, data, uploadCode) {
+  try {
+    const url = `${CALIBRATION_API_BASE}/api/calibration/${encodeURIComponent(subjectId)}`
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Upload-Token': uploadCode },
+      body: JSON.stringify(data)
+    })
+    if (!resp.ok) {
+      console.warn('Calibration upload failed:', resp.status)
+      return false
+    }
+    console.log('Calibration stored on server for', subjectId)
+    return true
+  } catch (err) {
+    console.warn('Calibration upload error:', err)
+    return false
+  }
 }

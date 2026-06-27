@@ -102,6 +102,51 @@ def health():
     return {'ok': True, 'time': now_utc_iso()}
 
 
+# ---- Calibration cache (pretest → formal skip) ----
+
+def _calibration_path(subject_id: str) -> Path:
+    sid = safe_id(subject_id)
+    return STORAGE_DIR / 'subjects' / sid / 'calibration.json'
+
+
+@app.get('/api/subject/{subject_id}/calibration')
+def get_calibration(subject_id: str):
+    """Return stored calibration for a subject (no auth needed — read-only)."""
+    path = _calibration_path(subject_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail='No calibration found for this subject')
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+from fastapi import Request as _Request
+
+@app.put('/api/calibration/{subject_id}')
+async def store_calibration(
+    subject_id: str,
+    request: _Request,
+    x_upload_token: str | None = Header(default=None),
+):
+    """Store calibration data after pretest completes (auth required)."""
+    if not UPLOAD_TOKEN:
+        raise HTTPException(status_code=500, detail='UPLOAD_TOKEN is not configured')
+    if x_upload_token != UPLOAD_TOKEN:
+        raise HTTPException(status_code=401, detail='Invalid upload token')
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid JSON body')
+
+    body['subject_id'] = safe_id(subject_id)
+    body['stored_at'] = now_utc_iso()
+
+    path = _calibration_path(subject_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    return {'ok': True, 'subject_id': body['subject_id'], 'stored_at': body['stored_at']}
+
+
 @app.post('/api/upload-session')
 async def upload_session(
     file: UploadFile = File(...),

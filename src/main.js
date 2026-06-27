@@ -79,7 +79,16 @@ async function startExperiment() {
   let scheduleFromServer = null
   if (params.upload_code) {
     target.innerHTML = '<div class="instruction-text">正在检查校准数据...</div>'
-    existingCalibration = await fetchStoredCalibration(params.participant, params.upload_code)
+    try {
+      existingCalibration = await fetchStoredCalibration(params.participant, params.upload_code)
+    } catch (err) {
+      target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+        <h2>校准检查失败</h2>
+        <p>${escapeHtml(err.message)}</p>
+        <p style="color:#888;font-size:14px;">请检查上传授权码后刷新页面重试。</p>
+      </div>`
+      return
+    }
 
     if (hasV2FormalSchedule(existingCalibration)) {
       scheduleFromServer = existingCalibration.formal_schedule
@@ -270,6 +279,7 @@ async function startExperiment() {
         console.log('Formal schedule generated:', formalBlocks ? Object.keys(formalBlocks).length : 0, 'blocks')
 
         // Upload full artifact (calibration + formal schedule)
+        // MUST complete before entering formal experiment — server is the single source of truth.
         if (params.upload_code) {
           const isTestSubject = /^TEST_/i.test(params.participant)
 
@@ -291,12 +301,28 @@ async function startExperiment() {
             if (hasV2FormalSchedule(existingCal)) {
               console.log('Calibration already exists for', params.participant, '— skipping upload to protect existing data')
             } else {
-              uploadCalibration(params.participant, buildArtifact(), params.upload_code)
-                .catch(err => console.warn('Calibration upload failed:', err))
+              const ok = await uploadCalibration(params.participant, buildArtifact(), params.upload_code)
+              if (!ok) {
+                target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+                  <h2>校准数据保存失败</h2>
+                  <p>正式实验排程未能保存到服务器。没有服务器保存的正式排程，后续将无法续做实验。</p>
+                  <p>请检查网络连接和上传授权码后重试。</p>
+                  <p style="color:#888;font-size:14px;">（联系实验负责人获取帮助）</p>
+                </div>`
+                return
+              }
             }
           } else {
-            uploadCalibration(params.participant, buildArtifact(), params.upload_code)
-              .catch(err => console.warn('Calibration upload failed:', err))
+            const ok = await uploadCalibration(params.participant, buildArtifact(), params.upload_code)
+            if (!ok) {
+              target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+                <h2>校准数据保存失败</h2>
+                <p>正式实验排程未能保存到服务器。没有服务器保存的正式排程，后续将无法续做实验。</p>
+                <p>请检查网络连接和上传授权码后重试。</p>
+                <p style="color:#888;font-size:14px;">（联系实验负责人获取帮助）</p>
+              </div>`
+              return
+            }
           }
         }
       } else {
@@ -505,13 +531,18 @@ async function fetchStoredCalibration(subjectId, uploadCode) {
     const url = `${CALIBRATION_API_BASE}/api/subject/${encodeURIComponent(subjectId)}/calibration`
     const headers = uploadCode ? { 'X-Upload-Token': uploadCode } : {}
     const resp = await fetch(url, { headers })
+    if (resp.status === 401) {
+      throw new Error('上传授权码错误，请检查后重新输入。')
+    }
     if (resp.status === 404) return null
     if (!resp.ok) {
-      console.warn('Calibration fetch failed:', resp.status)
-      return null
+      throw new Error(`校准缓存检查失败（${resp.status}），请稍后重试。`)
     }
     return await resp.json()
   } catch (err) {
+    if (err.message.includes('授权码') || err.message.includes('检查失败')) {
+      throw err
+    }
     console.warn('Calibration fetch error:', err)
     return null
   }

@@ -117,6 +117,23 @@ def _verify_auth(x_upload_token: str | None) -> None:
         raise HTTPException(status_code=401, detail='Invalid upload token')
 
 
+def _stable_stringify(value) -> str:
+    """Deterministic JSON serialization matching the browser's stableStringify."""
+    if isinstance(value, list):
+        return '[' + ','.join(_stable_stringify(v) for v in value) + ']'
+    if isinstance(value, dict):
+        keys = sorted(value.keys())
+        pairs = [json.dumps(k) + ':' + _stable_stringify(value[k]) for k in keys]
+        return '{' + ','.join(pairs) + '}'
+    return json.dumps(value)
+
+
+def _compute_blocks_hash(blocks: dict) -> str:
+    """Compute SHA-256 of stable-stringified formalBlocks."""
+    stable = _stable_stringify(blocks)
+    return hashlib.sha256(stable.encode('utf-8')).hexdigest()
+
+
 def _validate_formal_schedule(body: dict) -> None:
     """Validate calibration v2 formal_schedule before storing."""
     if body.get('schema_version') != 2:
@@ -138,6 +155,17 @@ def _validate_formal_schedule(body: dict) -> None:
 
     if total != 1100:
         raise HTTPException(status_code=400, detail='formal schedule total trials must be 1100')
+
+    # Verify formal_schedule_hash matches computed hash of blocks
+    client_hash = body.get('formal_schedule_hash')
+    if not client_hash:
+        raise HTTPException(status_code=400, detail='formal_schedule_hash is required')
+    computed_hash = _compute_blocks_hash(blocks)
+    if client_hash != computed_hash:
+        raise HTTPException(
+            status_code=400,
+            detail=f'formal_schedule_hash mismatch: client={client_hash}, computed={computed_hash}'
+        )
 
 
 @app.get('/api/subject/{subject_id}/calibration')

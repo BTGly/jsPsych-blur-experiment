@@ -2,15 +2,25 @@ import { FORMAL_PLAN } from './select-alpha.js'
 import { generateFormalTrials, splitBlocks } from './formal-generator.js'
 import { loadFormalImagePool } from '../data/formal-pool.js'
 
-function computeFormalScheduleHash(formalBlocks) {
-  const stable = JSON.stringify(formalBlocks, Object.keys(formalBlocks).sort())
-  let hash = 0
-  for (let i = 0; i < stable.length; i++) {
-    const ch = stable.charCodeAt(i)
-    hash = ((hash << 5) - hash) + ch
-    hash |= 0
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']'
   }
-  return Math.abs(hash).toString(16).padStart(8, '0')
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort()
+    return '{' + keys.map(k =>
+      JSON.stringify(k) + ':' + stableStringify(value[k])
+    ).join(',') + '}'
+  }
+  return JSON.stringify(value)
+}
+
+async function sha256Hex(str) {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(str)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 export async function buildFormalSchedule({ selected, pretestUsedPaths, subjectSeed }) {
@@ -23,7 +33,8 @@ export async function buildFormalSchedule({ selected, pretestUsedPaths, subjectS
 
   const { formalBlocks, blockDistributionRows } = splitBlocks(formalTrials, 11, 100, subjectSeed)
 
-  const formalScheduleHash = computeFormalScheduleHash(formalBlocks)
+  const stable = stableStringify(formalBlocks)
+  const formalScheduleHash = await sha256Hex(stable)
 
   return {
     formalSeed: subjectSeed,

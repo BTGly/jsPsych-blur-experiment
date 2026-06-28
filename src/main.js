@@ -280,11 +280,34 @@ async function startExperiment() {
 
         // Block if AUC is too low (matches Python behavior)
         if (expectedMetrics.aucQcStatus === 'fail') {
+          abortInfo = {
+            participant: params.participant,
+            date: getDateStr(),
+            phase: 'qc_fail',
+            abort_reason: 'auc_too_low',
+            expected_auc_binary: expectedMetrics.expectedAucBinary,
+            auc_threshold: expectedMetrics.AUC_HARD,
+            mu, sigma, nll,
+            abort_time: new Date().toISOString()
+          }
+          jsPsych.__dataCollector = {
+            pretestRecords,
+            calibrationSummaryRows,
+            blockDistributionRows: [],
+            formalBlocks: {},
+            pretestAlphaSummary: pretestAlphaSummaryRows,
+            scheduleSource: 'qc_fail',
+            startGroup: params.start_group,
+            endGroup: params.end_group,
+            formalScheduleHash: null
+          }
           target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
             <h2>校准质量过低</h2>
             <p>预期 AUC = ${expectedMetrics.expectedAucBinary.toFixed(3)}，低于最低阈值 ${expectedMetrics.AUC_HARD}。</p>
-            <p>请重新进行预实验。</p>
+            <p>预实验数据将自动下载以供检查。本次不进入正式实验。</p>
+            <p style="color:#888;font-size:14px;">请重新进行预实验。</p>
           </div>`
+          safeTriggerDownload()
           return
         }
 

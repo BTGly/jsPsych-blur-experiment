@@ -90,6 +90,14 @@ def init_db() -> None:
             ON experiment_sessions(uploaded_at)
             """
         )
+
+        # Migration: add columns if missing (safe to run repeatedly)
+        for col in ['schedule_source', 'formal_schedule_hash']:
+            try:
+                conn.execute(f'ALTER TABLE experiment_sessions ADD COLUMN {col} TEXT')
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
         conn.commit()
 
 
@@ -275,6 +283,8 @@ async def upload_session(
     abort_reason = str(meta.get('abort_reason', '') or '')
     sha256_client = str(meta.get('sha256', '') or '')
     app_version = str(meta.get('app_version', '') or '')
+    schedule_source = str(meta.get('schedule_source', '') or '')
+    formal_schedule_hash = str(meta.get('formal_schedule_hash', '') or '')
 
     session_dir = STORAGE_DIR / 'subjects' / subject_id / 'sessions' / session_id
     raw_dir = session_dir / 'raw'
@@ -331,6 +341,8 @@ async def upload_session(
         'sha256_client': sha256_client,
         'sha256_server': sha256_server,
         'app_version': app_version,
+        'schedule_source': schedule_source,
+        'formal_schedule_hash': formal_schedule_hash,
         'created_at': created_at,
         'uploaded_at': uploaded_at,
     }
@@ -350,8 +362,9 @@ async def upload_session(
                   zip_path, zip_size_bytes,
                   sha256_client, sha256_server,
                   upload_status, client_user_agent, app_version,
+                  schedule_source, formal_schedule_hash,
                   created_at, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -370,6 +383,8 @@ async def upload_session(
                     'uploaded',
                     user_agent,
                     app_version,
+                    schedule_source,
+                    formal_schedule_hash,
                     created_at,
                     uploaded_at,
                 ),

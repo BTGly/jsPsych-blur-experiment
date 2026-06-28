@@ -10,8 +10,7 @@ export function createParamForm() {
     <div class="param-form">
       <h1>认知行为实验 1.2</h1>
       <p style="font-size:13px;color:#aaa;margin-bottom:16px;">
-        正式被试编号格式：<b>S</b> + 三位数字（如 S001）<br>
-        测试请使用 <b>TEST_</b> + 三位数字（如 TEST_001）<br>
+        被试编号格式：<b>S</b> + 三位数字（如 S001）<br>
         如果已有实验记录，输入同一编号可跳过预实验。<br>
         已做过正式实验的被试，保持默认 1–11 即可，系统会自动从下一轮继续。
       </p>

@@ -146,7 +146,9 @@ async function startExperiment() {
       return
     }
 
-    if (progress?.is_complete) {
+    const isTestSubject = /^TEST_/i.test(params.participant)
+
+    if (!isTestSubject && progress?.is_complete) {
       target.innerHTML = `<div class="instruction-text">
         <h2>实验已完成</h2>
         <p>该被试已完成全部 11 轮正式实验。</p>
@@ -155,10 +157,27 @@ async function startExperiment() {
       return
     }
 
-    const isTestSubject = /^TEST_/i.test(params.participant)
+    const completedSet = new Set(progress.completed_blocks || [])
+    const hasCompletedProgress = completedSet.size > 0
+    const isDefaultFullRange = params.start_group === 1 && params.end_group === 11
+
+    // Auto-resume: default 1-11 with existing progress → advance BEFORE overlap check
+    if (!isTestSubject && isDefaultFullRange && hasCompletedProgress && progress.next_start_group !== null) {
+      params.start_group = progress.next_start_group
+      params.end_group = 11
+      window.__experimentParams = params
+      console.log(`Auto-resume: starting from block ${params.start_group}`)
+      target.innerHTML = `<div class="instruction-text" style="color:#4caf50;">
+        <p>检测到该被试已完成 ${[...completedSet].sort((a,b)=>a-b).join('、')} 轮。</p>
+        <p>本次自动从第 ${params.start_group} 轮开始，运行至第 ${params.end_group} 轮。</p>
+        <p style="color:#888;font-size:14px;">2 秒后自动继续</p>
+      </div>`
+      await new Promise(r => setTimeout(r, 2000))
+      target.innerHTML = ''
+    }
+
     const requestedStart = params.start_group
     const requestedEnd = params.end_group
-    const completedSet = new Set(progress.completed_blocks || [])
     const requestedRange = []
     for (let b = requestedStart; b <= requestedEnd; b++) requestedRange.push(b)
 
@@ -185,22 +204,6 @@ async function startExperiment() {
           <button onclick="location.reload()" style="font-size:18px;padding:8px 30px;margin-top:16px;cursor:pointer;">重新选择</button>
         </div>`
         return
-      }
-
-      // Auto-resume: if user left default 1-11 but has progress, auto-advance
-      if (progress.next_start_group !== null && requestedStart === 1 && requestedEnd === 11) {
-        params.start_group = progress.next_start_group
-        params.end_group = 11
-        window.__experimentParams = params
-        console.log(`Auto-resume: starting from block ${params.start_group}`)
-        target.innerHTML = `<div class="instruction-text" style="color:#4caf50;">
-          <p>检测到该被试已完成 ${[...completedSet].sort((a,b)=>a-b).join('、')} 轮。</p>
-          <p>本次自动从第 ${params.start_group} 轮开始，运行至第 ${params.end_group} 轮。</p>
-          <p style="color:#888;font-size:14px;">按 Enter 继续</p>
-        </div>`
-        // Show a brief instruction then clear it
-        await new Promise(r => setTimeout(r, 2000))
-        target.innerHTML = ''
       }
     } else {
       // TEST_ subjects: show progress info but allow override

@@ -324,6 +324,7 @@ def get_progress(
         'recommended_end_group': 11 if not is_complete else None,
         'is_complete': is_complete,
         'progress_conflict': progress_conflict,
+        'hashes': sorted(hashes),
         'sessions': sessions,
     }
 

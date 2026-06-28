@@ -2,6 +2,7 @@ import { loadCSV } from '../csv.js'
 import { conditionPath, assetPath, normalizePath } from '../paths.js'
 import { getDateStr, readFormParams } from '../config.js'
 import { practiceEndTimeline, practiceFeedbackTimeline } from '../task/feedback.js'
+import { createRNG, seedFromParticipant } from '../random.js'
 import HoldResponseTrialPlugin from '../task/hold-response-trial.js'
 
 export async function buildPracticeTimeline(jsPsych) {
@@ -12,11 +13,15 @@ export async function buildPracticeTimeline(jsPsych) {
   const allRows = await loadCSV(conditionPath('practice_data.csv'))
   const rows = allRows.slice(0, practiceCount)
 
+  // Shuffle practice trials deterministically per subject
+  const rng = createRNG(seedFromParticipant(params.participant) + 9999)
+  const shuffled = rng.shuffle(rows)
+
   const timeline = []
   const practiceState = { points: 0 }
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
+  for (let i = 0; i < shuffled.length; i++) {
+    const row = shuffled[i]
     const rawImagePath = normalizePath(row.image_path)
     const imageAssetPath = assetPath(rawImagePath)
 

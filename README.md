@@ -6,6 +6,7 @@
 
 - 在线实验：https://btgly.github.io/cognitive-behavior-experiment-1.2/
 - 算法验证页：https://btgly.github.io/cognitive-behavior-experiment-1.2/golden-test.html
+- [被试操作指南](被试操作指南.md)
 
 ## 实验流程
 

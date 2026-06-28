@@ -5,7 +5,8 @@
 Web-based blur discrimination experiment migrated from PsychoPy to [jsPsych](https://www.jspsych.org/) 8.0.
 
 **Live**: https://btgly.github.io/cognitive-behavior-experiment-1.2/  
-**Golden Test**: https://btgly.github.io/cognitive-behavior-experiment-1.2/golden-test.html
+**Golden Test**: https://btgly.github.io/cognitive-behavior-experiment-1.2/golden-test.html  
+**Subject Guide (Chinese)**: [被试操作指南](被试操作指南.md)
 
 ## Experiment Flow
 

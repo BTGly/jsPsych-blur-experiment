@@ -1,6 +1,6 @@
-# jsPsych 模糊辨别实验
+# jsPsych 认知行为实验 1.2
 
-这是从 PsychoPy 本地实验迁移到 jsPsych 8 的网页版模糊辨别实验。当前版本可在 GitHub Pages 或本地静态服务器运行，核心流程、预实验校准、正式实验生成和数据导出均在浏览器端完成。
+这是从 PsychoPy 本地实验迁移到 jsPsych 8 的网页版认知行为实验（1.2 版）。当前版本可在 GitHub Pages 或本地静态服务器运行，核心流程、预实验校准、正式实验生成和数据导出均在浏览器端完成。
 
 [English](README.en.md)
 

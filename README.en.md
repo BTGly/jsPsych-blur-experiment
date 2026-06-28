@@ -1,4 +1,4 @@
-# jsPsych Blur Discrimination Experiment
+# jsPsych Cognitive Behavior Experiment 1.2
 
 [中文说明](README.md)
 

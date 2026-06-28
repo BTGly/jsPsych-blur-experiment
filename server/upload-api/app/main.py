@@ -92,7 +92,8 @@ def init_db() -> None:
         )
 
         # Migration: add columns if missing (safe to run repeatedly)
-        for col in ['schedule_source', 'formal_schedule_hash']:
+        for col in ['schedule_source', 'formal_schedule_hash',
+                     'completed_blocks_json', 'partial_blocks_json', 'formal_block_counts_json']:
             try:
                 conn.execute(f'ALTER TABLE experiment_sessions ADD COLUMN {col} TEXT')
             except sqlite3.OperationalError:
@@ -250,6 +251,83 @@ async def store_calibration(
     return {'ok': True, 'subject_id': body['subject_id'], 'stored_at': body['stored_at']}
 
 
+@app.get('/api/subject/{subject_id}/progress')
+def get_progress(
+    subject_id: str,
+    x_upload_token: str | None = Header(default=None),
+):
+    """Return formal block progress for a subject (auth required)."""
+    _verify_auth(x_upload_token)
+    sid = safe_id(subject_id)
+
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT completed_blocks_json, partial_blocks_json, formal_block_counts_json,
+                   formal_schedule_hash, start_group, end_group, session_id
+            FROM experiment_sessions
+            WHERE subject_id = ?
+            ORDER BY created_at ASC
+            """,
+            (sid,),
+        ).fetchall()
+
+    all_completed = set()
+    all_partial = set()
+    all_counts = {}
+    hashes = set()
+    sessions = []
+
+    for row in rows:
+        cb_json, pb_json, fbc_json, fsh, sg, eg, sid_s = row
+
+        completed = json.loads(cb_json) if cb_json else []
+        partial = json.loads(pb_json) if pb_json else []
+        counts = json.loads(fbc_json) if fbc_json else {}
+
+        all_completed.update(completed)
+        all_partial.update(partial)
+        for k, v in counts.items():
+            all_counts[k] = max(all_counts.get(k, 0), v)
+        if fsh:
+            hashes.add(fsh)
+
+        sessions.append({
+            'session_id': sid_s,
+            'start_group': sg,
+            'end_group': eg,
+            'completed_blocks': completed,
+            'partial_blocks': partial,
+            'formal_schedule_hash': fsh or '',
+        })
+
+    # Partial excludes completed (completed wins)
+    all_partial -= all_completed
+
+    # Find next start block
+    next_start = None
+    for b in range(1, 12):
+        if b not in all_completed:
+            next_start = b
+            break
+
+    progress_conflict = len(hashes) > 1
+    is_complete = next_start is None
+
+    return {
+        'subject_id': sid,
+        'has_calibration': bool(len(hashes) > 0),
+        'formal_schedule_hash': list(hashes)[0] if len(hashes) == 1 else None,
+        'completed_blocks': sorted(all_completed),
+        'partial_blocks': sorted(all_partial),
+        'next_start_group': next_start,
+        'recommended_end_group': 11 if not is_complete else None,
+        'is_complete': is_complete,
+        'progress_conflict': progress_conflict,
+        'sessions': sessions,
+    }
+
+
 @app.post('/api/upload-session')
 async def upload_session(
     file: UploadFile = File(...),
@@ -285,6 +363,9 @@ async def upload_session(
     app_version = str(meta.get('app_version', '') or '')
     schedule_source = str(meta.get('schedule_source', '') or '')
     formal_schedule_hash = str(meta.get('formal_schedule_hash', '') or '')
+    completed_blocks = json.dumps(meta.get('completed_blocks', []) or [], ensure_ascii=False)
+    partial_blocks = json.dumps(meta.get('partial_blocks', []) or [], ensure_ascii=False)
+    formal_block_counts = json.dumps(meta.get('formal_block_counts', {}) or {}, ensure_ascii=False)
 
     session_dir = STORAGE_DIR / 'subjects' / subject_id / 'sessions' / session_id
     raw_dir = session_dir / 'raw'
@@ -343,6 +424,9 @@ async def upload_session(
         'app_version': app_version,
         'schedule_source': schedule_source,
         'formal_schedule_hash': formal_schedule_hash,
+        'completed_blocks': json.loads(completed_blocks) if isinstance(completed_blocks, str) else completed_blocks,
+        'partial_blocks': json.loads(partial_blocks) if isinstance(partial_blocks, str) else partial_blocks,
+        'formal_block_counts': json.loads(formal_block_counts) if isinstance(formal_block_counts, str) else formal_block_counts,
         'created_at': created_at,
         'uploaded_at': uploaded_at,
     }
@@ -363,8 +447,9 @@ async def upload_session(
                   sha256_client, sha256_server,
                   upload_status, client_user_agent, app_version,
                   schedule_source, formal_schedule_hash,
+                  completed_blocks_json, partial_blocks_json, formal_block_counts_json,
                   created_at, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -385,6 +470,9 @@ async def upload_session(
                     app_version,
                     schedule_source,
                     formal_schedule_hash,
+                    completed_blocks,
+                    partial_blocks,
+                    formal_block_counts,
                     created_at,
                     uploaded_at,
                 ),

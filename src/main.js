@@ -122,6 +122,93 @@ async function startExperiment() {
       return
     }
   }
+
+  // Check formal block progress (only if v2 cache exists)
+  let progress = null
+  if (scheduleFromServer && params.upload_code) {
+    try {
+      progress = await fetchStoredProgress(params.participant, params.upload_code)
+    } catch (err) {
+      target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+        <h2>进度检查失败</h2>
+        <p>${escapeHtml(err.message)}</p>
+        <p style="color:#888;font-size:14px;">请稍后重试。</p>
+      </div>`
+      return
+    }
+
+    if (progress?.progress_conflict) {
+      target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+        <h2>进度冲突</h2>
+        <p>该被试存在多个不同的正式实验排程（hash 不一致），请人工检查。</p>
+        <p style="color:#888;font-size:14px;">检测到 hash：${(progress.hashes || []).join(', ')}</p>
+      </div>`
+      return
+    }
+
+    if (progress?.is_complete) {
+      target.innerHTML = `<div class="instruction-text">
+        <h2>实验已完成</h2>
+        <p>该被试已完成全部 11 轮正式实验。</p>
+        <p style="color:#888;font-size:14px;">无需再次参加。</p>
+      </div>`
+      return
+    }
+
+    const isTestSubject = /^TEST_/i.test(params.participant)
+    const requestedStart = params.start_group
+    const requestedEnd = params.end_group
+    const completedSet = new Set(progress.completed_blocks || [])
+    const requestedRange = []
+    for (let b = requestedStart; b <= requestedEnd; b++) requestedRange.push(b)
+
+    if (!isTestSubject) {
+      // Check overlap with completed blocks
+      const overlap = requestedRange.filter(b => completedSet.has(b))
+      if (overlap.length > 0) {
+        const next = progress.next_start_group
+        target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+          <h2>轮次重叠</h2>
+          <p>你选择的 ${requestedStart}–${requestedEnd} 与已完成轮次 ${[...completedSet].sort((a,b)=>a-b).join('、')} 重叠。</p>
+          ${next ? `<p>下一轮应从第 ${next} 轮开始。</p>` : '<p>该被试已完成全部轮次。</p>'}
+          <button onclick="location.reload()" style="font-size:18px;padding:8px 30px;margin-top:16px;cursor:pointer;">重新选择</button>
+        </div>`
+        return
+      }
+
+      // Check skipping blocks
+      if (progress.next_start_group !== null && requestedStart > progress.next_start_group) {
+        target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
+          <h2>跳块检测</h2>
+          <p>该被试下一轮应从第 ${progress.next_start_group} 轮开始。</p>
+          <p>你选择的起始轮次 ${requestedStart} 跳过了第 ${progress.next_start_group}–${requestedStart - 1} 轮，不能跳过已完成和未完成之间的 block。</p>
+          <button onclick="location.reload()" style="font-size:18px;padding:8px 30px;margin-top:16px;cursor:pointer;">重新选择</button>
+        </div>`
+        return
+      }
+
+      // Auto-resume: if user left default 1-11 but has progress, auto-advance
+      if (progress.next_start_group !== null && requestedStart === 1 && requestedEnd === 11) {
+        params.start_group = progress.next_start_group
+        params.end_group = 11
+        window.__experimentParams = params
+        console.log(`Auto-resume: starting from block ${params.start_group}`)
+        target.innerHTML = `<div class="instruction-text" style="color:#4caf50;">
+          <p>检测到该被试已完成 ${[...completedSet].sort((a,b)=>a-b).join('、')} 轮。</p>
+          <p>本次自动从第 ${params.start_group} 轮开始，运行至第 ${params.end_group} 轮。</p>
+          <p style="color:#888;font-size:14px;">按 Enter 继续</p>
+        </div>`
+        // Show a brief instruction then clear it
+        await new Promise(r => setTimeout(r, 2000))
+        target.innerHTML = ''
+      }
+    } else {
+      // TEST_ subjects: show progress info but allow override
+      if (progress.next_start_group !== null) {
+        console.log(`TEST mode: completed ${[...completedSet].sort((a,b)=>a-b).join(',') || 'none'}, continuing with requested range ${requestedStart}-${requestedEnd}`)
+      }
+    }
+  }
   target.innerHTML = ''
 
   const jsPsych = initJsPsych({
@@ -158,7 +245,10 @@ async function startExperiment() {
       scheduleSource,
       startGroup: params.start_group,
       endGroup: params.end_group,
-      formalScheduleHash
+      formalScheduleHash,
+      completedBlocks: [],
+      partialBlocks: [],
+      formalBlockCounts: {}
     }
 
     if (!abortInfo) {
@@ -483,6 +573,7 @@ function triggerDownload(jsPsych, abortInfo = null) {
 
   setTimeout(async () => {
     const msgEl = document.querySelector('.instruction-text')
+    const progress = computeFormalProgress(allData)
     const summaries = {
       pretestAlphaSummary: collector.pretestAlphaSummary || [],
       calibrationSummary: collector.calibrationSummaryRows || [],
@@ -491,7 +582,10 @@ function triggerDownload(jsPsych, abortInfo = null) {
       scheduleSource: collector.scheduleSource || 'none',
       startGroup: collector.startGroup || params.start_group,
       endGroup: collector.endGroup || params.end_group,
-      formalScheduleHash: collector.formalScheduleHash || null
+      formalScheduleHash: collector.formalScheduleHash || null,
+      completedBlocks: progress.completed_blocks,
+      partialBlocks: progress.partial_blocks,
+      formalBlockCounts: progress.formal_block_counts
     }
 
     try {
@@ -540,9 +634,34 @@ function triggerDownload(jsPsych, abortInfo = null) {
   }, 100)
 }
 
+function computeFormalProgress(allData, blockSize = 100) {
+  const counts = {}
+  for (const row of allData) {
+    if (row.phase !== 'formal') continue
+    const b = parseInt(row.block_id)
+    if (!Number.isInteger(b) || b < 1 || b > 11) continue
+    counts[b] = (counts[b] || 0) + 1
+  }
+  const completed = []
+  const partial = []
+  for (let b = 1; b <= 11; b++) {
+    const n = counts[b] || 0
+    if (n >= blockSize) completed.push(b)
+    else if (n > 0) partial.push(b)
+  }
+  return {
+    completed_blocks: completed,
+    partial_blocks: partial,
+    formal_block_counts: Object.fromEntries(
+      Object.entries(counts).map(([k, v]) => [String(k), v])
+    )
+  }
+}
+
 function buildUploadMetadata(params, allData, abortInfo, dateStr, sha256, extraFields = {}) {
   const trialRows = allData.filter(row => row.phase && row.choice_digit !== undefined)
   const validTrialRows = trialRows.filter(row => parseInt(row.response_timeout) !== 1)
+  const progress = computeFormalProgress(allData)
 
   return {
     session_id: safeId(`${params.participant}_${dateStr}_start${params.start_group}_end${params.end_group}`),
@@ -558,7 +677,10 @@ function buildUploadMetadata(params, allData, abortInfo, dateStr, sha256, extraF
     created_at: new Date().toISOString(),
     app_version: 'web-static',
     schedule_source: extraFields.scheduleSource || 'none',
-    formal_schedule_hash: extraFields.formalScheduleHash || ''
+    formal_schedule_hash: extraFields.formalScheduleHash || '',
+    completed_blocks: progress.completed_blocks,
+    partial_blocks: progress.partial_blocks,
+    formal_block_counts: progress.formal_block_counts
   }
 }
 
@@ -623,5 +745,27 @@ async function uploadCalibration(subjectId, data, uploadCode) {
   } catch (err) {
     console.warn('Calibration upload error:', err)
     return false
+  }
+}
+
+async function fetchStoredProgress(subjectId, uploadCode) {
+  try {
+    const url = `${getCalibrationApiBase()}/api/subject/${encodeURIComponent(subjectId)}/progress`
+    const headers = uploadCode ? { 'X-Upload-Token': uploadCode } : {}
+    const resp = await fetch(url, { headers })
+    if (resp.status === 401) {
+      throw new Error('上传授权码错误，请检查后重新输入。')
+    }
+    if (resp.status === 404) return null
+    if (!resp.ok) {
+      throw new Error(`进度查询失败（${resp.status}），请稍后重试。`)
+    }
+    return await resp.json()
+  } catch (err) {
+    if (err.message.includes('授权码') || err.message.includes('进度查询')) {
+      throw err
+    }
+    console.warn('Progress fetch error:', err)
+    return null
   }
 }

@@ -4,8 +4,8 @@
 
 Web-based blur discrimination experiment migrated from PsychoPy to [jsPsych](https://www.jspsych.org/) 8.0.
 
-**Live**: https://btgly.github.io/jsPsych-blur-experiment/  
-**Golden Test**: https://btgly.github.io/jsPsych-blur-experiment/golden-test.html
+**Live**: https://btgly.github.io/cognitive-behavior-experiment-1.2/  
+**Golden Test**: https://btgly.github.io/cognitive-behavior-experiment-1.2/golden-test.html
 
 ## Experiment Flow
 
@@ -85,7 +85,7 @@ The same ZIP is then uploaded to the server if `upload_code` is provided (requir
 
 If the web version does not work, download the standalone Windows build:
 
-> **Download**: [Cognitive Behavior Experiment 1.2 — Windows](https://github.com/BTGly/jsPsych-blur-experiment/releases/tag/v1.2-fallback) (283 MB, extract and run `双击开始实验.exe`)
+> **Download**: [Cognitive Behavior Experiment 1.2 — Windows](https://github.com/BTGly/cognitive-behavior-experiment-1.2/releases/tag/v1.2-fallback) (283 MB, extract and run `双击开始实验.exe`)
 >
 > No Python installation required. Windows only.
 

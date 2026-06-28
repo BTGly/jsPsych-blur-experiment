@@ -4,8 +4,8 @@
 
 [English](README.en.md)
 
-- 在线实验：https://btgly.github.io/jsPsych-blur-experiment/
-- 算法验证页：https://btgly.github.io/jsPsych-blur-experiment/golden-test.html
+- 在线实验：https://btgly.github.io/cognitive-behavior-experiment-1.2/
+- 算法验证页：https://btgly.github.io/cognitive-behavior-experiment-1.2/golden-test.html
 
 ## 实验流程
 
@@ -72,7 +72,7 @@ src/data/                   数据 schema、summary、CSV/ZIP 导出
 也可以用 URL 参数预填，例如：
 
 ```text
-https://btgly.github.io/jsPsych-blur-experiment/?participant=S001&start_group=1&end_group=2
+https://btgly.github.io/cognitive-behavior-experiment-1.2/?participant=S001&start_group=1&end_group=2
 ```
 
 > 注意：`upload_code` 请勿写入 URL，由被试在页面中手动输入。
@@ -146,7 +146,7 @@ https://exp-api.cognitive-testing.cn
 
 如果网页版无法运行，可下载 Windows 本地版：
 
-> **下载**：[认知行为实验 1.2 本地版](https://github.com/BTGly/jsPsych-blur-experiment/releases/tag/v1.2-fallback)（283 MB，解压后运行 `双击开始实验.exe`）
+> **下载**：[认知行为实验 1.2 本地版](https://github.com/BTGly/cognitive-behavior-experiment-1.2/releases/tag/v1.2-fallback)（283 MB，解压后运行 `双击开始实验.exe`）
 >
 > 仅 Windows 系统可用，不需要安装 Python，解压即用。
 

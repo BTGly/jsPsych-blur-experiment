@@ -45,7 +45,7 @@ export function readFormParams() {
   const endGroup = parseInt(endGroupEl?.value)
 
   const params = {
-    participant: participantEl?.value.trim() || 'S001',
+    participant: participantEl?.value.trim() || '',
     practice_count: Number.isNaN(practiceCount) ? 24 : practiceCount,
     start_group: Number.isNaN(startGroup) ? 1 : startGroup,
     end_group: Number.isNaN(endGroup) ? 11 : endGroup,

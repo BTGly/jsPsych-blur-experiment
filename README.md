@@ -59,12 +59,12 @@ src/data/                   数据 schema、summary、CSV/ZIP 导出
 
 ## 启动参数
 
-参数页包含：
+参数页默认显示：
 
 - `participant`：被试编号，例如 `S001`（必填）。
 - `upload_code`：服务器上传授权码（必填）。不填无法开始实验。
-- `practice_count`：练习 trial 数，默认 24，可设为 0 跳过练习。
-- `start_group` / `end_group`：正式实验运行轮次，范围 1-11，支持分段实验。
+
+其余参数（`practice_count`、`start_group`、`end_group`）位于"主试高级设置"折叠区中。
 
 注意：预实验固定运行，不可跳过。upload_code 必须填写，否则实验会阻断并提示。
 

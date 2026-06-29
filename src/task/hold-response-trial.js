@@ -47,7 +47,8 @@ class HoldResponseTrialPlugin {
       responseTimeout: false,
       validResponse: false,
       choiceKey: null,
-      choiceDigit: null
+      choiceDigit: null,
+      imageLoadStatus: 'pending'
     }
 
     const container = document.createElement('div')
@@ -81,24 +82,47 @@ class HoldResponseTrialPlugin {
     imgEl.style.display = 'none'
     stimulusFrame.appendChild(imgEl)
 
-    this._ensureImageReady(imgEl).then(() => {
+    this._ensureImageReady(imgEl, 8000).then((status) => {
+      state.imageLoadStatus = status
       if (!state.trialEnded) {
-        this._startFixationPhase(container, fixationEl, stimulusFrame, imgEl, state, trial)
+        if (status === 'loaded') {
+          this._startFixationPhase(container, fixationEl, stimulusFrame, imgEl, state, trial)
+        } else {
+          fixationEl.textContent = '图片加载失败，自动跳过此题'
+          fixationEl.style.fontSize = '28px'
+          setTimeout(() => {
+            state.validResponse = false
+            this._endTrial(container, state, trial)
+          }, 1000)
+        }
       }
     })
   }
 
-  _ensureImageReady(imgEl) {
+  _ensureImageReady(imgEl, timeoutMs = 8000) {
     if (imgEl.complete && imgEl.naturalWidth > 0) {
-      if (imgEl.decode) return imgEl.decode().catch(() => {})
-      return Promise.resolve()
+      if (imgEl.decode) return imgEl.decode().then(() => 'loaded').catch(() => 'loaded')
+      return Promise.resolve('loaded')
     }
     return new Promise((resolve) => {
-      imgEl.onload = () => {
-        if (imgEl.decode) imgEl.decode().then(resolve).catch(resolve)
-        else resolve()
+      let settled = false
+      const finish = (status) => {
+        if (settled) return
+        settled = true
+        imgEl.onload = null
+        imgEl.onerror = null
+        clearTimeout(timer)
+        resolve(status)
       }
-      imgEl.onerror = () => resolve()
+      const timer = setTimeout(() => finish('timeout'), timeoutMs)
+      imgEl.onload = () => {
+        if (imgEl.decode) imgEl.decode().then(() => finish('loaded')).catch(() => finish('loaded'))
+        else finish('loaded')
+      }
+      imgEl.onerror = () => finish('error')
+      if (imgEl.complete) {
+        finish(imgEl.naturalWidth > 0 ? 'loaded' : 'error')
+      }
     })
   }
 
@@ -246,7 +270,10 @@ class HoldResponseTrialPlugin {
       confidence_bin_3level: confidenceBin,
       valid_response: state.validResponse,
       response_timeout: state.responseTimeout ? 1 : 0,
-      early_key_down_at_start: state.earlyKeyDown ? 1 : 0
+      early_key_down_at_start: state.earlyKeyDown ? 1 : 0,
+      image_load_status: state.imageLoadStatus,
+      image_load_error: state.imageLoadStatus === 'error' ? 1 : 0,
+      image_load_timeout: state.imageLoadStatus === 'timeout' ? 1 : 0
     }
 
     if (container.parentNode) {

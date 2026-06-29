@@ -5,7 +5,8 @@ export const RAW_DATA_FIELDS = [
   'choice_key', 'choice_digit', 'manual_accuracy', 'decision_rt',
   'hold_duration', 'confidence_hold_s', 'confidence_rating_formal',
   'confidence_bin_3level', 'valid_response', 'response_timeout',
-  'early_key_down_at_start', 'abort_reason', 'abort_time'
+  'early_key_down_at_start', 'image_load_status', 'image_load_error',
+  'image_load_timeout', 'abort_reason', 'abort_time'
 ]
 
 export const PRETEST_ALPHA_SUMMARY_FIELDS = [

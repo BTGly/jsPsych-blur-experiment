@@ -557,6 +557,7 @@ async function startExperiment() {
     jsPsych.run(finalTimeline)
   }
 
+  target.innerHTML = ''
   jsPsych.run(initialTimeline)
 }
 

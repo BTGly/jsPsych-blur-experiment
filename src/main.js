@@ -181,39 +181,10 @@ async function startExperiment() {
     const requestedRange = []
     for (let b = requestedStart; b <= requestedEnd; b++) requestedRange.push(b)
 
-    const cachedInitialStart = parseInt(existingCalibration?.provenance?.requested_start_group)
-    const cachedInitialEnd = parseInt(existingCalibration?.provenance?.requested_end_group)
-    if (
-      !isTestSubject &&
-      !hasCompletedProgress &&
-      isDefaultFullRange &&
-      Number.isInteger(cachedInitialStart) &&
-      Number.isInteger(cachedInitialEnd)
-    ) {
-      params.start_group = cachedInitialStart
-      params.end_group = cachedInitialEnd
-      window.__experimentParams = params
-      console.log(`Using cached initial range: ${params.start_group}-${params.end_group}`)
-      target.innerHTML = `<div class="instruction-text" style="color:#4caf50;">
-        <p>检测到该被试已有正式排程，原计划运行第 ${params.start_group}–${params.end_group} 轮。</p>
-        <p>本次将自动按原计划继续。</p>
-        <p style="color:#888;font-size:14px;">2 秒后自动继续</p>
-      </div>`
-      await new Promise(r => setTimeout(r, 2000))
-      target.innerHTML = ''
-    }
-
     const effectiveRequestedStart = params.start_group
     const effectiveRequestedEnd = params.end_group
     requestedRange.length = 0
     for (let b = effectiveRequestedStart; b <= effectiveRequestedEnd; b++) requestedRange.push(b)
-
-    const allowCachedInitialRange =
-      !hasCompletedProgress &&
-      Number.isInteger(cachedInitialStart) &&
-      Number.isInteger(cachedInitialEnd) &&
-      effectiveRequestedStart === cachedInitialStart &&
-      effectiveRequestedEnd === cachedInitialEnd
 
     if (!isTestSubject) {
       // Check overlap with completed blocks
@@ -230,7 +201,7 @@ async function startExperiment() {
       }
 
       // Check skipping blocks
-      if (progress.next_start_group !== null && effectiveRequestedStart > progress.next_start_group && !allowCachedInitialRange) {
+      if (progress.next_start_group !== null && effectiveRequestedStart > progress.next_start_group) {
         target.innerHTML = `<div class="instruction-text" style="color:#f44336;">
           <h2>跳块检测</h2>
           <p>该被试下一轮应从第 ${progress.next_start_group} 轮开始。</p>
